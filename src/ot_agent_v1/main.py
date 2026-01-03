@@ -2,6 +2,9 @@
 OpenThoughts Agent Datasets Dashboard
 """
 
+import io
+import tarfile
+
 import streamlit as st
 from datasets import load_dataset
 
@@ -103,14 +106,16 @@ st.markdown(
 )
 
 
+# ============ SFT Dataset Functions ============
+
 @st.cache_data(show_spinner="Loading SFT dataset from HuggingFace...")
 def load_sft_data():
     ds = load_dataset("open-thoughts/OpenThoughts-Agent-v1-SFT", split="train")
     return ds
 
 
-@st.cache_data(show_spinner="Building index...")
-def build_task_index(_ds):
+@st.cache_data(show_spinner="Building SFT index...")
+def build_sft_index(_ds):
     """Build task index with metadata."""
     tasks = {}
 
@@ -119,7 +124,6 @@ def build_task_index(_ds):
         task_id = row.get("task", "")
         conv = row.get("conversations", [])
 
-        # Get preview from first user message and count assistant chars
         preview = ""
         assistant_chars = 0
         for msg in conv:
@@ -139,7 +143,6 @@ def build_task_index(_ds):
                 else:
                     preview = content[:100].replace("\n", " ").strip()
 
-        # Determine task type
         if task_id.startswith("task_"):
             task_type = "nl2bash"
         elif task_id.startswith("inferredbugs-"):
@@ -156,7 +159,6 @@ def build_task_index(_ds):
             "task_type": task_type,
         }
 
-    # Sort tasks: first by type (task_ before inferredbugs), then by number
     def task_sort_key(task_id):
         if task_id.startswith("task_"):
             try:
@@ -171,11 +173,70 @@ def build_task_index(_ds):
         return (2, 0)
 
     sorted_task_ids = sorted(tasks.keys(), key=task_sort_key)
-
     return tasks, sorted_task_ids
 
 
-def main():
+# ============ RL Dataset Functions ============
+
+@st.cache_data(show_spinner="Loading RL dataset from HuggingFace...")
+def load_rl_data():
+    ds = load_dataset("open-thoughts/OpenThoughts-Agent-v1-RL", split="train")
+    return ds
+
+
+def decode_task_binary(task_binary: bytes) -> dict:
+    """Decode the gzipped tar archive and return file contents."""
+    files = {}
+    try:
+        tar_io = io.BytesIO(task_binary)
+        with tarfile.open(fileobj=tar_io, mode='r:gz') as tar:
+            for member in tar.getmembers():
+                if member.isfile():
+                    f = tar.extractfile(member)
+                    if f:
+                        try:
+                            content = f.read().decode('utf-8', errors='replace')
+                        except Exception:
+                            content = "[binary content]"
+                        files[member.name] = {
+                            "content": content,
+                            "size": member.size,
+                        }
+    except Exception as e:
+        files["error"] = {"content": str(e), "size": 0}
+    return files
+
+
+@st.cache_data(show_spinner="Building RL index...")
+def build_rl_index(_ds):
+    """Build RL task index."""
+    tasks = []
+    for i in range(len(_ds)):
+        row = _ds[i]
+        path = row.get("path", "")
+        task_binary = row.get("task_binary", b"")
+        
+        # Extract task number for sorting
+        try:
+            task_num = int(path.split("_")[1])
+        except (IndexError, ValueError):
+            task_num = 0
+        
+        tasks.append({
+            "ds_idx": i,
+            "path": path,
+            "task_num": task_num,
+            "binary_size": len(task_binary),
+        })
+    
+    # Sort by task number
+    tasks.sort(key=lambda x: x["task_num"])
+    return tasks
+
+
+# ============ SFT Tab ============
+
+def render_sft_tab():
     st.markdown(
         '<div class="main-title">🧠 OpenThoughts-Agent-v1-SFT</div>',
         unsafe_allow_html=True,
@@ -187,69 +248,48 @@ def main():
     )
 
     ds = load_sft_data()
-    tasks, sorted_task_ids = build_task_index(ds)
+    tasks, sorted_task_ids = build_sft_index(ds)
 
     # Stats row
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.markdown(
-            f"""
+        st.markdown(f'''
         <div class="stat-box">
             <div class="stat-value">{len(ds):,}</div>
             <div class="stat-label">Total Traces</div>
         </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        ''', unsafe_allow_html=True)
     with col2:
-        st.markdown(
-            f"""
+        st.markdown(f'''
         <div class="stat-box">
             <div class="stat-value">{len(tasks):,}</div>
             <div class="stat-label">Unique Tasks</div>
         </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        ''', unsafe_allow_html=True)
     with col3:
         nl2bash_count = sum(1 for t in sorted_task_ids if t.startswith("task_"))
         inferredbugs_count = sum(1 for t in sorted_task_ids if t.startswith("inferredbugs-"))
-        st.markdown(
-            f"""
+        st.markdown(f'''
         <div class="stat-box">
             <div class="stat-value">{nl2bash_count:,} / {inferredbugs_count:,}</div>
             <div class="stat-label">nl2bash / InferredBugs</div>
         </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        ''', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Filters
     filter_col1, filter_col2 = st.columns(2)
     with filter_col1:
-        task_type_filter = st.selectbox(
-            "Task Type",
-            ["All", "nl2bash", "inferredbugs"],
-            index=0,
-        )
+        task_type_filter = st.selectbox("Task Type", ["All", "nl2bash", "inferredbugs"], index=0, key="sft_type")
     with filter_col2:
-        sort_by = st.selectbox(
-            "Sort by",
-            ["Task ID", "Msgs ↑", "Msgs ↓", "Tokens ↑", "Tokens ↓"],
-            index=0,
-        )
+        sort_by = st.selectbox("Sort by", ["Task ID", "Msgs ↑", "Msgs ↓", "Tokens ↑", "Tokens ↓"], index=0, key="sft_sort")
 
     # Apply filters
-    filtered_task_ids = []
-    for task_id in sorted_task_ids:
-        task = tasks[task_id]
-
-        if task_type_filter != "All" and task["task_type"] != task_type_filter:
-            continue
-
-        filtered_task_ids.append(task_id)
+    filtered_task_ids = [
+        t for t in sorted_task_ids
+        if task_type_filter == "All" or tasks[t]["task_type"] == task_type_filter
+    ]
 
     # Apply sorting
     if sort_by == "Msgs ↑":
@@ -264,19 +304,17 @@ def main():
     # Pagination
     page_size = 50
     total_pages = max(1, (len(filtered_task_ids) + page_size - 1) // page_size)
-
-    page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1)
+    page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1, key="sft_page")
     start_idx = (page - 1) * page_size
     end_idx = min(start_idx + page_size, len(filtered_task_ids))
 
     st.caption(f"Showing tasks {start_idx + 1} to {end_idx} of {len(filtered_task_ids):,}")
 
-    # Build table for current page
+    # Build table
     table_data = []
     for i in range(start_idx, end_idx):
         task_id = filtered_task_ids[i]
         task = tasks[task_id]
-
         table_data.append({
             "table_idx": i,
             "task_id": task_id,
@@ -301,6 +339,7 @@ def main():
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
+        key="sft_table",
     )
 
     # Show selected task details
@@ -315,7 +354,6 @@ def main():
 
         sample = ds[task["ds_idx"]]
 
-        # Show metadata
         col1, col2 = st.columns([1, 3])
         with col1:
             st.markdown("**Metadata**")
@@ -347,7 +385,6 @@ def main():
                     unsafe_allow_html=True,
                 )
 
-                # Split first user message into prefix and task
                 if role == "user" and is_first_user and "Task Description:" in content:
                     is_first_user = False
                     split_idx = content.find("Task Description:")
@@ -366,6 +403,130 @@ def main():
                             st.code(content, language=None)
                     else:
                         st.code(content, language=None)
+
+
+# ============ RL Tab ============
+
+def render_rl_tab():
+    st.markdown(
+        '<div class="main-title">🎮 OpenThoughts-Agent-v1-RL</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="subtitle">728 RL tasks from nl2bash verified dataset<br>'
+        '<span style="font-size: 0.75rem; opacity: 0.7;">Each task contains instruction, Dockerfile, tests, and solution</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    ds = load_rl_data()
+    tasks = build_rl_index(ds)
+
+    # Stats row
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f'''
+        <div class="stat-box">
+            <div class="stat-value">{len(ds):,}</div>
+            <div class="stat-label">Total Tasks</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    with col2:
+        avg_size = sum(t["binary_size"] for t in tasks) // len(tasks) if tasks else 0
+        st.markdown(f'''
+        <div class="stat-box">
+            <div class="stat-value">{avg_size:,} bytes</div>
+            <div class="stat-label">Avg Archive Size</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Pagination
+    page_size = 50
+    total_pages = max(1, (len(tasks) + page_size - 1) // page_size)
+    page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1, key="rl_page")
+    start_idx = (page - 1) * page_size
+    end_idx = min(start_idx + page_size, len(tasks))
+
+    st.caption(f"Showing tasks {start_idx + 1} to {end_idx} of {len(tasks):,}")
+
+    # Build table
+    table_data = []
+    for i in range(start_idx, end_idx):
+        task = tasks[i]
+        table_data.append({
+            "table_idx": i,
+            "path": task["path"],
+            "size": f"{task['binary_size']:,} bytes",
+        })
+
+    import pandas as pd
+    df = pd.DataFrame(table_data)
+
+    event = st.dataframe(
+        df,
+        column_config={
+            "table_idx": None,
+            "path": st.column_config.Column("Task ID", width=120),
+            "size": st.column_config.Column("Archive Size", width=120),
+        },
+        width="stretch",
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="rl_table",
+    )
+
+    # Show selected task details
+    if event.selection and event.selection.rows:
+        selected_row = event.selection.rows[0]
+        task = tasks[start_idx + selected_row]
+
+        st.divider()
+        st.subheader(f"Task: {task['path']}")
+
+        # Decode the binary
+        row = ds[task["ds_idx"]]
+        task_binary = row.get("task_binary", b"")
+        files = decode_task_binary(task_binary)
+
+        st.caption(f"Archive contains {len(files)} files")
+
+        # Show files in tabs
+        if files:
+            file_names = list(files.keys())
+            file_tabs = st.tabs(file_names)
+            
+            for tab, fname in zip(file_tabs, file_names):
+                with tab:
+                    file_info = files[fname]
+                    st.caption(f"{file_info['size']} bytes")
+                    
+                    # Determine language for syntax highlighting
+                    if fname.endswith(".md"):
+                        st.markdown(file_info["content"])
+                    elif fname.endswith(".json"):
+                        st.code(file_info["content"], language="json")
+                    elif fname.endswith(".toml"):
+                        st.code(file_info["content"], language="toml")
+                    elif fname.endswith(".sh"):
+                        st.code(file_info["content"], language="bash")
+                    elif fname.endswith("Dockerfile"):
+                        st.code(file_info["content"], language="dockerfile")
+                    else:
+                        st.code(file_info["content"], language=None)
+
+
+# ============ Main ============
+
+def main():
+    tab1, tab2 = st.tabs(["📝 SFT Dataset", "🎮 RL Dataset"])
+    
+    with tab1:
+        render_sft_tab()
+    
+    with tab2:
+        render_rl_tab()
 
 
 if __name__ == "__main__":
