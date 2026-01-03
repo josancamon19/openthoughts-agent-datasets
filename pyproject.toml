@@ -1,0 +1,14 @@
+[project]
+name = "openthoughts-agent-datasets"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "datasets>=4.4.2",
+    "duckdb>=1.4.3",
+    "streamlit>=1.52.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ot_agent_v1"]
