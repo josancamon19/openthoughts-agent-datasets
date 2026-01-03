@@ -8,7 +8,7 @@ import tarfile
 import streamlit as st
 from datasets import load_dataset
 
-from env import create_daytona_sandbox, extract_task_to_tempdir, run_async
+from env import create_harbor_daytona_env, extract_task_to_tempdir, run_async
 
 st.set_page_config(
     page_title="OpenThoughts Agent",
@@ -599,33 +599,35 @@ def render_rl_tab():
             )
 
             with st.status(
-                "🚀 Spinning up Daytona environment...", expanded=True
+                "🚀 Spinning up Daytona environment via Harbor...", expanded=True
             ) as status:
                 st.write("Extracting task files...")
-                tmpdir = extract_task_to_tempdir(task_binary_to_use)
+                task_dir = extract_task_to_tempdir(task_binary_to_use)
 
-                if tmpdir:
-                    dockerfile_path = tmpdir / "environment" / "Dockerfile"
+                if task_dir:
+                    dockerfile_path = task_dir / "environment" / "Dockerfile"
                     if dockerfile_path.exists():
-                        st.write(f"Found Dockerfile at {dockerfile_path}")
+                        st.write(f"Task extracted to: {task_dir}")
                         st.write(
-                            "Creating Daytona sandbox (this may take 1-2 minutes)..."
+                            "Building environment with Harbor (this may take 1-2 minutes)..."
                         )
 
                         try:
                             result = run_async(
-                                create_daytona_sandbox(
-                                    st.session_state.daytona_api_key, dockerfile_path
+                                create_harbor_daytona_env(
+                                    st.session_state.daytona_api_key, task_dir
                                 )
                             )
                             status.update(
                                 label="✅ Environment ready!", state="complete"
                             )
 
-                            st.success(f"**Sandbox ID:** `{result['sandbox_id']}`")
+                            st.success(f"**Task:** `{result['task_name']}` | **Sandbox ID:** `{result['sandbox_id']}`")
                             st.code(result["ssh_command"], language="bash")
                             st.info(
-                                "Run the SSH command above in your terminal to connect. Environment auto-deletes in 30 minutes."
+                                "Run the SSH command above in your terminal to connect. "
+                                "Solution is at /oracle/, tests at /tests/. "
+                                "Environment auto-deletes in 30 minutes."
                             )
 
                             # Store active sandbox info
@@ -640,6 +642,9 @@ def render_rl_tab():
                         st.error(
                             "This task doesn't have a Dockerfile in the environment/ folder."
                         )
+                else:
+                    status.update(label="❌ Failed to extract task", state="error")
+                    st.error("Could not extract task archive.")
 
         # Show active sandbox if exists
         if st.session_state.get("active_sandbox"):
