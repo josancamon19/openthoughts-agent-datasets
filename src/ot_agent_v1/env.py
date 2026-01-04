@@ -170,48 +170,50 @@ async def run_claude_code_agent(
 
     # Run the agent (note: this calls populate_context_post_run but won't find logs yet)
     status("Running agent...")
-    
+
     # We manually run the commands instead of using agent.run() so we can download logs first
     from harbor.utils.templating import render_prompt_template
-    
+
     rendered_instruction = instruction
     if agent._prompt_template_path:
         rendered_instruction = render_prompt_template(
             agent._prompt_template_path, instruction
         )
-    
-    for i, exec_input in enumerate(agent.create_run_agent_commands(rendered_instruction)):
+
+    for i, exec_input in enumerate(
+        agent.create_run_agent_commands(rendered_instruction)
+    ):
         command_dir = logs_dir / f"command-{i}"
         command_dir.mkdir(parents=True, exist_ok=True)
         (command_dir / "command.txt").write_text(exec_input.command)
-        
+
         # Only show meaningful progress, not raw commands
         if i == 0:
             status("Setting up agent environment...")
         else:
             status("Agent is working on the task...")
-        
+
         result = await env.exec(
             command=exec_input.command,
             cwd=exec_input.cwd,
             env=exec_input.env,
             timeout_sec=exec_input.timeout_sec,
         )
-        
+
         (command_dir / "return-code.txt").write_text(str(result.return_code))
         if result.stdout:
             (command_dir / "stdout.txt").write_text(result.stdout)
         if result.stderr:
             (command_dir / "stderr.txt").write_text(result.stderr)
-        
+
         # Only report errors
         if result.return_code != 0:
             status(f"⚠️ Command {i} failed with exit code {result.return_code}")
-    
+
     # Try to download agent logs from container to local logs_dir
     status("Collecting agent trajectory...")
     container_agent_dir = str(EnvironmentPaths.agent_dir)  # /logs/agent
-    
+
     download_success = False
     try:
         await env.download_dir(
@@ -222,15 +224,17 @@ async def run_claude_code_agent(
         sessions_dir = logs_dir / "sessions"
         if sessions_dir.exists():
             import subprocess
+
             find_result = subprocess.run(
                 ["find", str(sessions_dir), "-type", "f", "-name", "*.jsonl"],
-                capture_output=True, text=True
+                capture_output=True,
+                text=True,
             )
             if find_result.stdout.strip():
                 download_success = True
     except Exception:
         pass  # Silently fall back to stdout parsing
-    
+
     # Fallback: Create sessions directory from stdout if download failed
     if not download_success:
         stdout_file = logs_dir / "command-1" / "stdout.txt"
@@ -238,12 +242,13 @@ async def run_claude_code_agent(
             # Create the expected sessions directory structure
             sessions_dir = logs_dir / "sessions" / "projects" / "-app"
             sessions_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Copy stdout as a JSONL session file
             session_jsonl = sessions_dir / "session.jsonl"
             import shutil
+
             shutil.copy(stdout_file, session_jsonl)
-    
+
     # Parse trajectory from logs
     agent.populate_context_post_run(context)
     status("Agent run complete!")
@@ -260,7 +265,7 @@ async def run_claude_code_agent(
     agent_output_file = logs_dir / "command-1" / "stdout.txt"
     if agent_output_file.exists():
         raw_output = agent_output_file.read_text()
-    
+
     return {
         "sandbox_id": env._sandbox.id,
         "ssh_command": ssh_command,
