@@ -537,7 +537,7 @@ def render_rl_tab():
     if event.selection and event.selection.rows:
         selected_row = event.selection.rows[0]
         task = tasks[start_idx + selected_row]
-        
+
         # Clear previous results when task changes
         if st.session_state.get("current_task_path") != task["path"]:
             st.session_state.current_task_path = task["path"]
@@ -548,7 +548,7 @@ def render_rl_tab():
 
         # Header with task name and controls
         st.subheader(f"Task: {task['path']}")
-        
+
         # Agent selector and Start button
         control_col1, control_col2 = st.columns([2, 1])
         with control_col1:
@@ -562,7 +562,10 @@ def render_rl_tab():
             st.session_state.selected_agent = selected_agent
         with control_col2:
             start_task_clicked = st.button(
-                "🚀 Start Task", type="primary", key="start_task_btn", use_container_width=True
+                "🚀 Start Task",
+                type="primary",
+                key="start_task_btn",
+                use_container_width=True,
             )
 
         # Decode the binary
@@ -576,7 +579,7 @@ def render_rl_tab():
             env_api_key = os.environ.get("DAYTONA_API_KEY")
             if env_api_key:
                 st.session_state.daytona_api_key = env_api_key
-            
+
             if not st.session_state.get("daytona_api_key"):
                 st.session_state.show_api_key_dialog = True
             elif not os.environ.get("ANTHROPIC_API_KEY"):
@@ -623,9 +626,7 @@ def render_rl_tab():
             st.session_state.running_task = False
             task_binary_to_use = st.session_state.get("task_binary", task_binary)
 
-            with st.status(
-                "🚀 Starting task...", expanded=True
-            ) as task_status:
+            with st.status("🚀 Starting task...", expanded=True) as task_status:
                 st.write("Extracting task files...")
                 task_dir = extract_task_to_tempdir(task_binary_to_use)
 
@@ -645,16 +646,16 @@ def render_rl_tab():
                     try:
                         import threading
                         import time
-                        
+
                         # Capture API key before thread (st.session_state not accessible in thread)
                         daytona_key = st.session_state.daytona_api_key
-                        
+
                         # Collect status messages (can't use st.write from thread)
                         status_log = []
                         task_done = threading.Event()
                         task_result = [None]
                         task_error = [None]
-                        
+
                         def run_task():
                             try:
                                 task_result[0] = run_async(
@@ -669,15 +670,15 @@ def render_rl_tab():
                                 task_error[0] = e
                             finally:
                                 task_done.set()
-                        
+
                         # Start task in background
                         task_thread = threading.Thread(target=run_task)
                         task_thread.start()
-                        
+
                         # Poll and display progress
                         progress_placeholder = st.empty()
                         displayed_count = 0
-                        
+
                         while not task_done.is_set():
                             # Show new status messages
                             if len(status_log) > displayed_count:
@@ -686,33 +687,30 @@ def render_rl_tab():
                                         st.write(msg)
                                 displayed_count = len(status_log)
                             time.sleep(0.3)
-                        
+
                         # Final display of all messages
                         with progress_placeholder.container():
                             for msg in status_log:
                                 st.write(msg)
-                        
+
                         task_thread.join()
-                        
+
                         if task_error[0]:
                             raise task_error[0]
-                        
+
                         result = task_result[0]
-                        
-                        task_status.update(
-                            label="✅ Task completed!", state="complete"
-                        )
+
+                        task_status.update(label="✅ Task completed!", state="complete")
 
                         # Store result for display
                         st.session_state.agent_result = result
                         st.session_state.active_sandbox = result
 
                     except Exception as e:
-                        task_status.update(
-                            label="❌ Task failed", state="error"
-                        )
+                        task_status.update(label="❌ Task failed", state="error")
                         st.error(f"Error: {e}")
                         import traceback
+
                         st.code(traceback.format_exc(), language=None)
 
         # Show agent result with trajectory
@@ -726,7 +724,9 @@ def render_rl_tab():
                 with col2:
                     ctx = result.get("context", {})
                     st.markdown(f"**Input tokens:** {ctx.get('n_input_tokens') or 0:,}")
-                    st.markdown(f"**Output tokens:** {ctx.get('n_output_tokens') or 0:,}")
+                    st.markdown(
+                        f"**Output tokens:** {ctx.get('n_output_tokens') or 0:,}"
+                    )
 
                 st.code(result["ssh_command"], language="bash")
 
@@ -759,7 +759,9 @@ def render_rl_tab():
 
                         if message:
                             if len(message) > 1000:
-                                with st.expander(f"View message ({len(message):,} chars)"):
+                                with st.expander(
+                                    f"View message ({len(message):,} chars)"
+                                ):
                                     st.code(message, language=None)
                             else:
                                 st.code(message, language=None)
@@ -785,7 +787,12 @@ def render_rl_tab():
                     if raw_output:
                         st.markdown("### 📄 Raw Agent Output")
                         with st.expander("View raw output", expanded=True):
-                            st.code(raw_output[-5000:] if len(raw_output) > 5000 else raw_output, language=None)
+                            st.code(
+                                raw_output[-5000:]
+                                if len(raw_output) > 5000
+                                else raw_output,
+                                language=None,
+                            )
 
         # Show active sandbox if exists
         if st.session_state.get("active_sandbox"):
