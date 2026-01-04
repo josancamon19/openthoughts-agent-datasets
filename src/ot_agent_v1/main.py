@@ -11,7 +11,6 @@ from datasets import load_dataset
 from dotenv import load_dotenv
 
 from env import (
-    create_harbor_daytona_env,
     extract_task_to_tempdir,
     run_async,
     run_claude_code_agent,
@@ -541,17 +540,23 @@ def render_rl_tab():
 
         st.divider()
 
-        # Header with Open Environment and Run Agent buttons
-        header_col1, header_col2, header_col3 = st.columns([2, 1, 1])
-        with header_col1:
-            st.subheader(f"Task: {task['path']}")
-        with header_col2:
-            open_env_clicked = st.button(
-                "🚀 Open Environment", type="primary", key="open_env_btn"
+        # Header with task name and controls
+        st.subheader(f"Task: {task['path']}")
+        
+        # Agent selector and Start button
+        control_col1, control_col2 = st.columns([2, 1])
+        with control_col1:
+            selected_agent = st.selectbox(
+                "Agent",
+                ["Claude Code"],
+                index=0,
+                key="agent_selector",
+                label_visibility="collapsed",
             )
-        with header_col3:
-            run_agent_clicked = st.button(
-                "🤖 Run Claude Code", type="secondary", key="run_agent_btn"
+            st.session_state.selected_agent = selected_agent
+        with control_col2:
+            start_task_clicked = st.button(
+                "🚀 Start Task", type="primary", key="start_task_btn", use_container_width=True
             )
 
         # Decode the binary
@@ -559,24 +564,21 @@ def render_rl_tab():
         task_binary = row.get("task_binary", b"")
         files = decode_task_binary(task_binary)
 
-        # Handle Open Environment button
-        if open_env_clicked:
-            # Check if API key is in environment first, then session state
+        # Handle Start Task button
+        if start_task_clicked:
+            # Check API keys
             env_api_key = os.environ.get("DAYTONA_API_KEY")
             if env_api_key:
                 st.session_state.daytona_api_key = env_api_key
-                st.session_state.spinning_up_env = True
-                st.session_state.selected_task_binary = task_binary
-                st.session_state.selected_task_path = task["path"]
-            elif (
-                "daytona_api_key" not in st.session_state
-                or not st.session_state.daytona_api_key
-            ):
+            
+            if not st.session_state.get("daytona_api_key"):
                 st.session_state.show_api_key_dialog = True
+            elif not os.environ.get("ANTHROPIC_API_KEY"):
+                st.error("ANTHROPIC_API_KEY not found in .env")
             else:
-                st.session_state.spinning_up_env = True
-                st.session_state.selected_task_binary = task_binary
-                st.session_state.selected_task_path = task["path"]
+                st.session_state.running_task = True
+                st.session_state.task_binary = task_binary
+                st.session_state.task_path = task["path"]
 
         # API Key dialog
         if st.session_state.get("show_api_key_dialog", False):
@@ -597,9 +599,9 @@ def render_rl_tab():
                         if api_key_input and api_key_input.startswith("dtn_"):
                             st.session_state.daytona_api_key = api_key_input
                             st.session_state.show_api_key_dialog = False
-                            st.session_state.spinning_up_env = True
-                            st.session_state.selected_task_binary = task_binary
-                            st.session_state.selected_task_path = task["path"]
+                            st.session_state.running_task = True
+                            st.session_state.task_binary = task_binary
+                            st.session_state.task_path = task["path"]
                             st.rerun()
                         else:
                             st.error(
@@ -610,95 +612,29 @@ def render_rl_tab():
                         st.session_state.show_api_key_dialog = False
                         st.rerun()
 
-        # Spin up environment
-        if st.session_state.get("spinning_up_env", False):
-            st.session_state.spinning_up_env = False
-            task_binary_to_use = st.session_state.get(
-                "selected_task_binary", task_binary
-            )
+        # Run task flow (environment + agent)
+        if st.session_state.get("running_task", False):
+            st.session_state.running_task = False
+            task_binary_to_use = st.session_state.get("task_binary", task_binary)
 
             with st.status(
-                "🚀 Spinning up Daytona environment via Harbor...", expanded=True
-            ) as status:
+                "🚀 Starting task...", expanded=True
+            ) as task_status:
                 st.write("Extracting task files...")
                 task_dir = extract_task_to_tempdir(task_binary_to_use)
 
-                if task_dir:
-                    dockerfile_path = task_dir / "environment" / "Dockerfile"
-                    if dockerfile_path.exists():
-                        st.write(f"Task extracted to: {task_dir}")
-                        st.write(
-                            "Building environment with Harbor (this may take 1-2 minutes)..."
-                        )
-
-                        try:
-                            result = run_async(
-                                create_harbor_daytona_env(
-                                    st.session_state.daytona_api_key, task_dir
-                                )
-                            )
-                            status.update(
-                                label="✅ Environment ready!", state="complete"
-                            )
-
-                            st.success(f"**Task:** `{result['task_name']}` | **Sandbox ID:** `{result['sandbox_id']}`")
-                            st.code(result["ssh_command"], language="bash")
-                            st.info(
-                                "Run the SSH command above in your terminal to connect. "
-                                "Solution is at /oracle/, tests at /tests/. "
-                                "Environment auto-deletes in 30 minutes."
-                            )
-
-                            # Store active sandbox info
-                            st.session_state.active_sandbox = result
-                        except Exception as e:
-                            status.update(
-                                label="❌ Failed to create environment", state="error"
-                            )
-                            st.error(f"Error: {e}")
-                    else:
-                        status.update(label="❌ No Dockerfile found", state="error")
-                        st.error(
-                            "This task doesn't have a Dockerfile in the environment/ folder."
-                        )
-                else:
-                    status.update(label="❌ Failed to extract task", state="error")
+                if not task_dir:
+                    task_status.update(label="❌ Failed to extract task", state="error")
                     st.error("Could not extract task archive.")
-
-        # Handle Run Agent button
-        if run_agent_clicked:
-            env_api_key = os.environ.get("DAYTONA_API_KEY")
-            if env_api_key:
-                st.session_state.daytona_api_key = env_api_key
-            if not st.session_state.get("daytona_api_key"):
-                st.error("Please set DAYTONA_API_KEY in .env or enter it above")
-            elif not os.environ.get("ANTHROPIC_API_KEY"):
-                st.error("ANTHROPIC_API_KEY not found in environment")
-            else:
-                st.session_state.running_agent = True
-                st.session_state.agent_task_binary = task_binary
-                st.session_state.agent_task_path = task["path"]
-
-        # Run agent flow
-        if st.session_state.get("running_agent", False):
-            st.session_state.running_agent = False
-            agent_task_binary = st.session_state.get("agent_task_binary", task_binary)
-
-            with st.status(
-                "🤖 Running Claude Code agent...", expanded=True
-            ) as agent_status:
-                st.write("Extracting task files...")
-                task_dir = extract_task_to_tempdir(agent_task_binary)
-
-                if task_dir:
-                    # Read instruction from task
+                else:
+                    # Read instruction
                     instruction_file = task_dir / "instruction.md"
                     if instruction_file.exists():
                         instruction = instruction_file.read_text()
                     else:
                         instruction = "Complete the task in this environment."
 
-                    st.write(f"Instruction: {instruction[:200]}...")
+                    st.write(f"**Goal:** {instruction[:300]}...")
 
                     try:
                         result = run_async(
@@ -709,8 +645,8 @@ def render_rl_tab():
                                 on_status=lambda msg: st.write(msg),
                             )
                         )
-                        agent_status.update(
-                            label="✅ Agent completed!", state="complete"
+                        task_status.update(
+                            label="✅ Task completed!", state="complete"
                         )
 
                         # Store result for display
@@ -718,15 +654,12 @@ def render_rl_tab():
                         st.session_state.active_sandbox = result
 
                     except Exception as e:
-                        agent_status.update(
-                            label="❌ Agent failed", state="error"
+                        task_status.update(
+                            label="❌ Task failed", state="error"
                         )
                         st.error(f"Error: {e}")
                         import traceback
                         st.code(traceback.format_exc(), language=None)
-                else:
-                    agent_status.update(label="❌ Failed to extract task", state="error")
-                    st.error("Could not extract task archive.")
 
         # Show agent result with trajectory
         if st.session_state.get("agent_result"):
@@ -793,6 +726,12 @@ def render_rl_tab():
                                         st.code(content[:2000], language=None)
                 else:
                     st.warning("No trajectory data available")
+                    # Show raw output for debugging
+                    raw_output = result.get("raw_output")
+                    if raw_output:
+                        st.markdown("### 📄 Raw Agent Output")
+                        with st.expander("View raw output", expanded=True):
+                            st.code(raw_output[-5000:] if len(raw_output) > 5000 else raw_output, language=None)
 
         # Show active sandbox if exists
         if st.session_state.get("active_sandbox"):

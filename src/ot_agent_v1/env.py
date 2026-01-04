@@ -143,33 +143,110 @@ async def run_claude_code_agent(
     status(f"Starting environment for task: {task.name}")
     await env.start(force_build=True)
 
+    # Get SSH access early so user can connect while agent runs
+    ssh_access = await env._sandbox.create_ssh_access()
+    ssh_command = f"ssh {ssh_access.token}@ssh.app.daytona.io"
+    status(f"🔗 SSH ready: {ssh_command}")
+
     # Upload solution and tests
     if task.paths.solution_dir.exists():
-        status("Uploading solution...")
+        status("Uploading task files...")
         await env.upload_dir(
             task.paths.solution_dir, str(EnvironmentPaths.solution_dir)
         )
 
     if task.paths.tests_dir.exists():
-        status("Uploading tests...")
         await env.upload_dir(task.paths.tests_dir, str(EnvironmentPaths.tests_dir))
 
     # Create agent instance
     agent = ClaudeCode(logs_dir=logs_dir)
 
     # Setup agent (installs claude-code in container)
-    status("Installing Claude Code agent in container (this may take 1-2 min)...")
+    status("Installing Claude Code agent...")
     await agent.setup(env)
 
     # Create agent context
     context = AgentContext()
 
-    # Run the agent
+    # Run the agent (note: this calls populate_context_post_run but won't find logs yet)
     status("Running agent...")
-    await agent.run(instruction, env, context)
-
-    # Get SSH access
-    ssh_access = await env._sandbox.create_ssh_access()
+    
+    # We manually run the commands instead of using agent.run() so we can download logs first
+    from harbor.utils.templating import render_prompt_template
+    
+    rendered_instruction = instruction
+    if agent._prompt_template_path:
+        rendered_instruction = render_prompt_template(
+            agent._prompt_template_path, instruction
+        )
+    
+    for i, exec_input in enumerate(agent.create_run_agent_commands(rendered_instruction)):
+        command_dir = logs_dir / f"command-{i}"
+        command_dir.mkdir(parents=True, exist_ok=True)
+        (command_dir / "command.txt").write_text(exec_input.command)
+        
+        # Only show meaningful progress, not raw commands
+        if i == 0:
+            status("Setting up agent environment...")
+        else:
+            status("Agent is working on the task...")
+        
+        result = await env.exec(
+            command=exec_input.command,
+            cwd=exec_input.cwd,
+            env=exec_input.env,
+            timeout_sec=exec_input.timeout_sec,
+        )
+        
+        (command_dir / "return-code.txt").write_text(str(result.return_code))
+        if result.stdout:
+            (command_dir / "stdout.txt").write_text(result.stdout)
+        if result.stderr:
+            (command_dir / "stderr.txt").write_text(result.stderr)
+        
+        # Only report errors
+        if result.return_code != 0:
+            status(f"⚠️ Command {i} failed with exit code {result.return_code}")
+    
+    # Try to download agent logs from container to local logs_dir
+    status("Collecting agent trajectory...")
+    container_agent_dir = str(EnvironmentPaths.agent_dir)  # /logs/agent
+    
+    download_success = False
+    try:
+        await env.download_dir(
+            source_dir=container_agent_dir,
+            target_dir=str(logs_dir),
+        )
+        # Check if we got the session files
+        sessions_dir = logs_dir / "sessions"
+        if sessions_dir.exists():
+            import subprocess
+            find_result = subprocess.run(
+                ["find", str(sessions_dir), "-type", "f", "-name", "*.jsonl"],
+                capture_output=True, text=True
+            )
+            if find_result.stdout.strip():
+                download_success = True
+    except Exception:
+        pass  # Silently fall back to stdout parsing
+    
+    # Fallback: Create sessions directory from stdout if download failed
+    if not download_success:
+        stdout_file = logs_dir / "command-1" / "stdout.txt"
+        if stdout_file.exists():
+            # Create the expected sessions directory structure
+            sessions_dir = logs_dir / "sessions" / "projects" / "-app"
+            sessions_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Copy stdout as a JSONL session file
+            session_jsonl = sessions_dir / "session.jsonl"
+            import shutil
+            shutil.copy(stdout_file, session_jsonl)
+    
+    # Parse trajectory from logs
+    agent.populate_context_post_run(context)
+    status("Agent run complete!")
 
     # Load trajectory if available
     trajectory = None
@@ -178,12 +255,19 @@ async def run_claude_code_agent(
         with open(trajectory_path) as f:
             trajectory = json.load(f)
 
+    # Read raw agent output for debugging
+    raw_output = None
+    agent_output_file = logs_dir / "command-1" / "stdout.txt"
+    if agent_output_file.exists():
+        raw_output = agent_output_file.read_text()
+    
     return {
         "sandbox_id": env._sandbox.id,
-        "ssh_command": f"ssh {ssh_access.token}@ssh.app.daytona.io",
+        "ssh_command": ssh_command,
         "task_name": task.name,
         "logs_dir": str(logs_dir),
         "trajectory": trajectory,
+        "raw_output": raw_output,
         "context": {
             "cost_usd": context.cost_usd,
             "n_input_tokens": context.n_input_tokens,
