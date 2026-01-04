@@ -9,6 +9,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "duckdb>=1.4.3",
     "harbor>=0.1.33",
+    "nest-asyncio>=1.6.0",
     "ruff>=0.14.10",
     "streamlit>=1.52.2",
     "ty>=0.0.8",

@@ -284,19 +284,21 @@ async def run_claude_code_agent(
 
 
 def run_async(coro):
-    """Run async function in sync context - safe for Streamlit."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop is not None:
-        # Already in an async context - create new thread
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(asyncio.run, coro)
-            return future.result()
-    else:
-        # Not in async context - use new event loop
-        return asyncio.run(coro)
+    """Run async function in sync context - safe for Streamlit.
+    
+    Always runs in a fresh thread to avoid event loop caching issues
+    with the Daytona SDK between Streamlit reruns.
+    """
+    import concurrent.futures
+    import sys
+    
+    # Clear cached modules that might hold stale event loop references
+    modules_to_clear = [k for k in sys.modules.keys() 
+                        if k.startswith(('daytona', 'harbor.environments'))]
+    for mod in modules_to_clear:
+        sys.modules.pop(mod, None)
+    
+    # Always run in a new thread with a fresh event loop
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(asyncio.run, coro)
+        return future.result()
