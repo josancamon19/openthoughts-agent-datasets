@@ -10,7 +10,12 @@ import streamlit as st
 from datasets import load_dataset
 from dotenv import load_dotenv
 
-from env import create_harbor_daytona_env, extract_task_to_tempdir, run_async
+from env import (
+    create_harbor_daytona_env,
+    extract_task_to_tempdir,
+    run_async,
+    run_claude_code_agent,
+)
 
 load_dotenv()
 
@@ -536,13 +541,17 @@ def render_rl_tab():
 
         st.divider()
 
-        # Header with Open Environment button
-        header_col1, header_col2 = st.columns([3, 1])
+        # Header with Open Environment and Run Agent buttons
+        header_col1, header_col2, header_col3 = st.columns([2, 1, 1])
         with header_col1:
             st.subheader(f"Task: {task['path']}")
         with header_col2:
             open_env_clicked = st.button(
                 "🚀 Open Environment", type="primary", key="open_env_btn"
+            )
+        with header_col3:
+            run_agent_clicked = st.button(
+                "🤖 Run Claude Code", type="secondary", key="run_agent_btn"
             )
 
         # Decode the binary
@@ -655,6 +664,135 @@ def render_rl_tab():
                 else:
                     status.update(label="❌ Failed to extract task", state="error")
                     st.error("Could not extract task archive.")
+
+        # Handle Run Agent button
+        if run_agent_clicked:
+            env_api_key = os.environ.get("DAYTONA_API_KEY")
+            if env_api_key:
+                st.session_state.daytona_api_key = env_api_key
+            if not st.session_state.get("daytona_api_key"):
+                st.error("Please set DAYTONA_API_KEY in .env or enter it above")
+            elif not os.environ.get("ANTHROPIC_API_KEY"):
+                st.error("ANTHROPIC_API_KEY not found in environment")
+            else:
+                st.session_state.running_agent = True
+                st.session_state.agent_task_binary = task_binary
+                st.session_state.agent_task_path = task["path"]
+
+        # Run agent flow
+        if st.session_state.get("running_agent", False):
+            st.session_state.running_agent = False
+            agent_task_binary = st.session_state.get("agent_task_binary", task_binary)
+
+            with st.status(
+                "🤖 Running Claude Code agent...", expanded=True
+            ) as agent_status:
+                st.write("Extracting task files...")
+                task_dir = extract_task_to_tempdir(agent_task_binary)
+
+                if task_dir:
+                    # Read instruction from task
+                    instruction_file = task_dir / "instruction.md"
+                    if instruction_file.exists():
+                        instruction = instruction_file.read_text()
+                    else:
+                        instruction = "Complete the task in this environment."
+
+                    st.write(f"Instruction: {instruction[:200]}...")
+
+                    try:
+                        result = run_async(
+                            run_claude_code_agent(
+                                task_dir=task_dir,
+                                instruction=instruction,
+                                daytona_api_key=st.session_state.daytona_api_key,
+                                on_status=lambda msg: st.write(msg),
+                            )
+                        )
+                        agent_status.update(
+                            label="✅ Agent completed!", state="complete"
+                        )
+
+                        # Store result for display
+                        st.session_state.agent_result = result
+                        st.session_state.active_sandbox = result
+
+                    except Exception as e:
+                        agent_status.update(
+                            label="❌ Agent failed", state="error"
+                        )
+                        st.error(f"Error: {e}")
+                        import traceback
+                        st.code(traceback.format_exc(), language=None)
+                else:
+                    agent_status.update(label="❌ Failed to extract task", state="error")
+                    st.error("Could not extract task archive.")
+
+        # Show agent result with trajectory
+        if st.session_state.get("agent_result"):
+            result = st.session_state.agent_result
+            with st.expander("🤖 Agent Run Result", expanded=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown(f"**Task:** `{result['task_name']}`")
+                    st.markdown(f"**Sandbox ID:** `{result['sandbox_id']}`")
+                with col2:
+                    ctx = result.get("context", {})
+                    st.markdown(f"**Input tokens:** {ctx.get('n_input_tokens') or 0:,}")
+                    st.markdown(f"**Output tokens:** {ctx.get('n_output_tokens') or 0:,}")
+
+                st.code(result["ssh_command"], language="bash")
+
+                # Show trajectory
+                trajectory = result.get("trajectory")
+                if trajectory:
+                    st.markdown("### 📜 Agent Trajectory")
+                    steps = trajectory.get("steps", [])
+                    st.caption(f"{len(steps)} steps")
+
+                    for step in steps:
+                        source = step.get("source", "unknown")
+                        message = step.get("message", "")
+                        tool_calls = step.get("tool_calls", [])
+
+                        if source == "agent":
+                            icon = "🤖"
+                            css_class = "msg-assistant"
+                        elif source == "user":
+                            icon = "👤"
+                            css_class = "msg-user"
+                        else:
+                            icon = "⚙️"
+                            css_class = "msg-system"
+
+                        st.markdown(
+                            f'<div class="{css_class}"><div class="msg-role">{icon} {source}</div></div>',
+                            unsafe_allow_html=True,
+                        )
+
+                        if message:
+                            if len(message) > 1000:
+                                with st.expander(f"View message ({len(message):,} chars)"):
+                                    st.code(message, language=None)
+                            else:
+                                st.code(message, language=None)
+
+                        for tc in tool_calls:
+                            fn_name = tc.get("function_name", "unknown")
+                            args = tc.get("arguments", {})
+                            st.markdown(f"**Tool:** `{fn_name}`")
+                            if args:
+                                st.json(args)
+
+                        obs = step.get("observation")
+                        if obs and obs.get("results"):
+                            for r in obs["results"]:
+                                content = r.get("content", "")
+                                if content:
+                                    with st.expander("📤 Tool output"):
+                                        st.code(content[:2000], language=None)
+                else:
+                    st.warning("No trajectory data available")
 
         # Show active sandbox if exists
         if st.session_state.get("active_sandbox"):
