@@ -85,7 +85,7 @@ async def run_claude_code_agent(
     task_dir: Path,
     instruction: str,
     daytona_api_key: str,
-    on_status: callable = None,
+    status_log: list = None,
 ) -> dict:
     """
     Run Claude Code agent on a task in a Daytona environment.
@@ -94,15 +94,15 @@ async def run_claude_code_agent(
         task_dir: Path to the extracted task directory
         instruction: The task instruction to give the agent
         daytona_api_key: Daytona API key
-        on_status: Optional callback for status updates (for Streamlit)
+        status_log: Optional list to collect status messages
 
     Returns:
         Dict with sandbox_id, trajectory, and agent context
     """
 
     def status(msg):
-        if on_status:
-            on_status(msg)
+        if status_log is not None:
+            status_log.append(msg)
         print(f"[*] {msg}")
 
     # Set Daytona credentials

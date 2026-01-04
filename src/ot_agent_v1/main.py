@@ -537,6 +537,12 @@ def render_rl_tab():
     if event.selection and event.selection.rows:
         selected_row = event.selection.rows[0]
         task = tasks[start_idx + selected_row]
+        
+        # Clear previous results when task changes
+        if st.session_state.get("current_task_path") != task["path"]:
+            st.session_state.current_task_path = task["path"]
+            st.session_state.agent_result = None
+            st.session_state.active_sandbox = None
 
         st.divider()
 
@@ -637,14 +643,62 @@ def render_rl_tab():
                     st.write(f"**Goal:** {instruction[:300]}...")
 
                     try:
-                        result = run_async(
-                            run_claude_code_agent(
-                                task_dir=task_dir,
-                                instruction=instruction,
-                                daytona_api_key=st.session_state.daytona_api_key,
-                                on_status=lambda msg: st.write(msg),
-                            )
-                        )
+                        import threading
+                        import time
+                        
+                        # Capture API key before thread (st.session_state not accessible in thread)
+                        daytona_key = st.session_state.daytona_api_key
+                        
+                        # Collect status messages (can't use st.write from thread)
+                        status_log = []
+                        task_done = threading.Event()
+                        task_result = [None]
+                        task_error = [None]
+                        
+                        def run_task():
+                            try:
+                                task_result[0] = run_async(
+                                    run_claude_code_agent(
+                                        task_dir=task_dir,
+                                        instruction=instruction,
+                                        daytona_api_key=daytona_key,
+                                        status_log=status_log,
+                                    )
+                                )
+                            except Exception as e:
+                                task_error[0] = e
+                            finally:
+                                task_done.set()
+                        
+                        # Start task in background
+                        task_thread = threading.Thread(target=run_task)
+                        task_thread.start()
+                        
+                        # Poll and display progress
+                        progress_placeholder = st.empty()
+                        displayed_count = 0
+                        
+                        while not task_done.is_set():
+                            # Show new status messages
+                            if len(status_log) > displayed_count:
+                                with progress_placeholder.container():
+                                    for msg in status_log:
+                                        st.write(msg)
+                                displayed_count = len(status_log)
+                            time.sleep(0.3)
+                        
+                        # Final display of all messages
+                        with progress_placeholder.container():
+                            for msg in status_log:
+                                st.write(msg)
+                        
+                        task_thread.join()
+                        
+                        if task_error[0]:
+                            raise task_error[0]
+                        
+                        result = task_result[0]
+                        
                         task_status.update(
                             label="✅ Task completed!", state="complete"
                         )
