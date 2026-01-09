@@ -600,7 +600,7 @@ def render_rl_tab():
                 st.session_state.show_api_key_dialog = True
             elif not os.environ.get(required_api_key):
                 st.error(
-                    f"{required_api_key} not found in .env (required for {selected_display_name})"
+                    f"{required_api_key} not set. Add it in the sidebar or .env file (required for {selected_display_name})"
                 )
             else:
                 st.session_state.running_task = True
@@ -608,12 +608,12 @@ def render_rl_tab():
                 st.session_state.task_path = task["path"]
                 st.session_state.selected_agent_name = selected_agent_name
 
-        # API Key dialog
+        # API Key dialog (fallback if not set in sidebar)
         if st.session_state.get("show_api_key_dialog", False):
             with st.container():
                 st.markdown("### 🔐 Daytona API Key Required")
                 st.markdown(
-                    "Enter your Daytona API key to spin up environments. Get one at [app.daytona.io](https://app.daytona.io)"
+                    "Enter your Daytona API key to spin up environments. You can also set it in the **sidebar** or get one at [app.daytona.io](https://app.daytona.io)"
                 )
                 api_key_input = st.text_input(
                     "API Key",
@@ -1049,10 +1049,98 @@ def render_rl_tab():
                         st.code(file_info["content"], language=None)
 
 
+# ============ Sidebar for API Keys ============
+
+
+def render_sidebar():
+    """Render sidebar with API key configuration."""
+    with st.sidebar:
+        st.markdown("### 🔑 API Keys")
+        st.caption("Configure API keys for agents and environments")
+        
+        # Daytona API Key (required for all agents)
+        st.markdown("**Daytona** (required)")
+        daytona_key = st.text_input(
+            "Daytona API Key",
+            value=st.session_state.get("daytona_api_key", os.environ.get("DAYTONA_API_KEY", "")),
+            type="password",
+            key="sidebar_daytona_key",
+            placeholder="dtn_...",
+            label_visibility="collapsed",
+        )
+        if daytona_key:
+            st.session_state.daytona_api_key = daytona_key
+        
+        st.divider()
+        
+        # Agent API Keys
+        st.markdown("**Agent API Keys**")
+        
+        # Anthropic (Claude Code, Terminus2)
+        anthropic_key = st.text_input(
+            "Anthropic API Key",
+            value=os.environ.get("ANTHROPIC_API_KEY", ""),
+            type="password",
+            key="sidebar_anthropic_key",
+            placeholder="sk-ant-...",
+            help="For Claude Code and Terminus2",
+        )
+        if anthropic_key:
+            os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+        
+        # OpenAI (Codex)
+        openai_key = st.text_input(
+            "OpenAI API Key",
+            value=os.environ.get("OPENAI_API_KEY", ""),
+            type="password",
+            key="sidebar_openai_key",
+            placeholder="sk-...",
+            help="For Codex",
+        )
+        if openai_key:
+            os.environ["OPENAI_API_KEY"] = openai_key
+        
+        # Gemini
+        gemini_key = st.text_input(
+            "Gemini API Key",
+            value=os.environ.get("GEMINI_API_KEY", ""),
+            type="password",
+            key="sidebar_gemini_key",
+            placeholder="AIza...",
+            help="For Gemini CLI",
+        )
+        if gemini_key:
+            os.environ["GEMINI_API_KEY"] = gemini_key
+        
+        st.divider()
+        
+        # Status indicators
+        st.markdown("**Status**")
+        
+        def key_status(name: str, env_var: str, prefix: str = "") -> None:
+            value = os.environ.get(env_var, "")
+            if value and (not prefix or value.startswith(prefix)):
+                st.markdown(f"✅ {name}")
+            else:
+                st.markdown(f"⬜ {name}")
+        
+        key_status("Daytona", "DAYTONA_API_KEY", "dtn_")
+        key_status("Anthropic", "ANTHROPIC_API_KEY", "sk-ant-")
+        key_status("OpenAI", "OPENAI_API_KEY", "sk-")
+        key_status("Gemini", "GEMINI_API_KEY", "AIza")
+        
+        # Also set Daytona from session state to env
+        if st.session_state.get("daytona_api_key"):
+            os.environ["DAYTONA_API_KEY"] = st.session_state.daytona_api_key
+
+
 # ============ Main ============
 
 
 def main():
+    # Render sidebar first
+    render_sidebar()
+    
     tab1, tab2 = st.tabs(["📝 SFT Dataset", "🎮 RL Dataset"])
 
     with tab1:
