@@ -116,6 +116,14 @@ st.markdown(
         border-radius: 8px;
         padding: 0.5rem;
     }
+    
+    /* Narrow sidebar */
+    section[data-testid="stSidebar"] {
+        width: 280px !important;
+    }
+    section[data-testid="stSidebar"] > div {
+        width: 280px !important;
+    }
 </style>
 """,
     unsafe_allow_html=True,

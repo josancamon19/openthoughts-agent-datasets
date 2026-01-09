@@ -63,6 +63,9 @@ DEFAULT_GEMINI_MODEL = "gemini/gemini-3-flash-preview"
 # Default OpenAI model for Codex
 DEFAULT_OPENAI_MODEL = "gpt-5.1-codex-max"
 
+# Default OpenHands model (LiteLLM format)
+DEFAULT_OPENHANDS_MODEL = "anthropic/claude-opus-4-5-20251101"
+
 # Agent configuration - display names and default models
 # Using Harbor's AgentName values as keys
 AGENT_CONFIG = {
@@ -85,6 +88,11 @@ AGENT_CONFIG = {
         "display_name": "Codex (OpenAI)",
         "api_key_env": "OPENAI_API_KEY",
         "default_model": DEFAULT_OPENAI_MODEL,  # OpenAI model name
+    },
+    "openhands": {
+        "display_name": "OpenHands",
+        "api_key_env": "ANTHROPIC_API_KEY",  # Uses LLM_API_KEY internally, derived from model
+        "default_model": DEFAULT_OPENHANDS_MODEL,  # LiteLLM format
     },
 }
 
@@ -333,6 +341,21 @@ async def convert_logs_to_trajectory(
                     print(f"[DEBUG] Created trajectory.json from codex.txt ({len(events)} events)")
                 except Exception as e:
                     print(f"[DEBUG] Failed to convert codex.txt: {e}")
+
+        # Try openhands.trajectory.json if still no trajectory (native OpenHands format)
+        if not trajectory_path.exists():
+            openhands_traj = logs_dir / "openhands.trajectory.json"
+            if openhands_traj.exists():
+                print("[DEBUG] trajectory.json not found, using openhands.trajectory.json as fallback")
+                try:
+                    with open(openhands_traj) as f:
+                        oh_data = json.load(f)
+                    # OpenHands native format has a list of events directly
+                    with open(trajectory_path, "w") as f:
+                        json.dump({"events": oh_data, "source": "openhands.trajectory.json"}, f, indent=2)
+                    print(f"[DEBUG] Created trajectory.json from openhands.trajectory.json ({len(oh_data)} events)")
+                except Exception as e:
+                    print(f"[DEBUG] Failed to convert openhands.trajectory.json: {e}")
 
 
 async def run_verification(env, status_fn: Callable[[str], None], logs_dir: Path):
