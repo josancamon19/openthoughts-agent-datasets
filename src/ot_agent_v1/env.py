@@ -79,6 +79,11 @@ AGENT_CONFIG = {
         "api_key_env": "ANTHROPIC_API_KEY",
         "default_model": DEFAULT_MODEL_LITELLM,  # LiteLLM format
     },
+    "cursor-cli": {
+        "display_name": "Cursor CLI",
+        "api_key_env": "CURSOR_API_KEY",
+        "default_model": DEFAULT_MODEL_LITELLM,  # LiteLLM format: provider/model
+    },
     "gemini-cli": {
         "display_name": "Gemini CLI",
         "api_key_env": "GEMINI_API_KEY",
@@ -303,13 +308,18 @@ async def convert_logs_to_trajectory(
     try:
         print(f"[DEBUG] agent.logs_dir = {agent.logs_dir}")
         print(f"[DEBUG] our logs_dir = {logs_dir}")
-        print(f"[DEBUG] Before populate_context_post_run, logs_dir contents: {list(logs_dir.iterdir()) if logs_dir.exists() else 'dir not found'}")
+        print(
+            f"[DEBUG] Before populate_context_post_run, logs_dir contents: {list(logs_dir.iterdir()) if logs_dir.exists() else 'dir not found'}"
+        )
         agent.populate_context_post_run(context)
         print("[DEBUG] populate_context_post_run completed")
-        print(f"[DEBUG] After populate_context_post_run, logs_dir contents: {list(logs_dir.iterdir()) if logs_dir.exists() else 'dir not found'}")
+        print(
+            f"[DEBUG] After populate_context_post_run, logs_dir contents: {list(logs_dir.iterdir()) if logs_dir.exists() else 'dir not found'}"
+        )
     except Exception as e:
         print(f"[DEBUG] populate_context_post_run failed: {e}")
         import traceback
+
         traceback.print_exc()
 
     # Fallback: If trajectory.json wasn't created, try to convert native log files
@@ -318,16 +328,22 @@ async def convert_logs_to_trajectory(
         # Try claude-code.txt first
         claude_code_txt = logs_dir / "claude-code.txt"
         if claude_code_txt.exists():
-            print("[DEBUG] trajectory.json not found, using claude-code.txt as fallback")
+            print(
+                "[DEBUG] trajectory.json not found, using claude-code.txt as fallback"
+            )
             try:
                 lines = claude_code_txt.read_text().strip().split("\n")
                 events = [json.loads(line) for line in lines if line.strip()]
                 with open(trajectory_path, "w") as f:
-                    json.dump({"events": events, "source": "claude-code.txt"}, f, indent=2)
-                print(f"[DEBUG] Created trajectory.json from claude-code.txt ({len(events)} events)")
+                    json.dump(
+                        {"events": events, "source": "claude-code.txt"}, f, indent=2
+                    )
+                print(
+                    f"[DEBUG] Created trajectory.json from claude-code.txt ({len(events)} events)"
+                )
             except Exception as e:
                 print(f"[DEBUG] Failed to convert claude-code.txt: {e}")
-        
+
         # Try codex.txt if still no trajectory
         if not trajectory_path.exists():
             codex_txt = logs_dir / "codex.txt"
@@ -337,23 +353,60 @@ async def convert_logs_to_trajectory(
                     lines = codex_txt.read_text().strip().split("\n")
                     events = [json.loads(line) for line in lines if line.strip()]
                     with open(trajectory_path, "w") as f:
-                        json.dump({"events": events, "source": "codex.txt"}, f, indent=2)
-                    print(f"[DEBUG] Created trajectory.json from codex.txt ({len(events)} events)")
+                        json.dump(
+                            {"events": events, "source": "codex.txt"}, f, indent=2
+                        )
+                    print(
+                        f"[DEBUG] Created trajectory.json from codex.txt ({len(events)} events)"
+                    )
                 except Exception as e:
                     print(f"[DEBUG] Failed to convert codex.txt: {e}")
+
+        # Try cursor-cli.txt if still no trajectory
+        if not trajectory_path.exists():
+            cursor_cli_txt = logs_dir / "cursor-cli.txt"
+            if cursor_cli_txt.exists():
+                print(
+                    "[DEBUG] trajectory.json not found, using cursor-cli.txt as fallback"
+                )
+                try:
+                    content = cursor_cli_txt.read_text()
+                    # cursor-cli.txt is raw output, wrap it as a single event
+                    with open(trajectory_path, "w") as f:
+                        json.dump(
+                            {
+                                "events": [{"type": "output", "content": content}],
+                                "source": "cursor-cli.txt",
+                            },
+                            f,
+                            indent=2,
+                        )
+                    print(
+                        f"[DEBUG] Created trajectory.json from cursor-cli.txt ({len(content)} chars)"
+                    )
+                except Exception as e:
+                    print(f"[DEBUG] Failed to convert cursor-cli.txt: {e}")
 
         # Try openhands.trajectory.json if still no trajectory (native OpenHands format)
         if not trajectory_path.exists():
             openhands_traj = logs_dir / "openhands.trajectory.json"
             if openhands_traj.exists():
-                print("[DEBUG] trajectory.json not found, using openhands.trajectory.json as fallback")
+                print(
+                    "[DEBUG] trajectory.json not found, using openhands.trajectory.json as fallback"
+                )
                 try:
                     with open(openhands_traj) as f:
                         oh_data = json.load(f)
                     # OpenHands native format has a list of events directly
                     with open(trajectory_path, "w") as f:
-                        json.dump({"events": oh_data, "source": "openhands.trajectory.json"}, f, indent=2)
-                    print(f"[DEBUG] Created trajectory.json from openhands.trajectory.json ({len(oh_data)} events)")
+                        json.dump(
+                            {"events": oh_data, "source": "openhands.trajectory.json"},
+                            f,
+                            indent=2,
+                        )
+                    print(
+                        f"[DEBUG] Created trajectory.json from openhands.trajectory.json ({len(oh_data)} events)"
+                    )
                 except Exception as e:
                     print(f"[DEBUG] Failed to convert openhands.trajectory.json: {e}")
 
@@ -399,12 +452,16 @@ async def run_verification(env, status_fn: Callable[[str], None], logs_dir: Path
     trajectory = None
     trajectory_path = logs_dir / "trajectory.json"
     print(f"[DEBUG] Looking for trajectory at: {trajectory_path}")
-    print(f"[DEBUG] logs_dir contents: {list(logs_dir.iterdir()) if logs_dir.exists() else 'dir not found'}")
+    print(
+        f"[DEBUG] logs_dir contents: {list(logs_dir.iterdir()) if logs_dir.exists() else 'dir not found'}"
+    )
     if trajectory_path.exists():
         print("[DEBUG] Found trajectory.json, loading...")
         with open(trajectory_path) as f:
             trajectory = json.load(f)
-        print(f"[DEBUG] Loaded trajectory with keys: {trajectory.keys() if trajectory else 'None'}")
+        print(
+            f"[DEBUG] Loaded trajectory with keys: {trajectory.keys() if trajectory else 'None'}"
+        )
     else:
         print(f"[DEBUG] trajectory.json NOT FOUND at {trajectory_path}")
 
@@ -449,7 +506,9 @@ async def run_agent(
         print(f"[*] {msg}")
 
     status_fn = status
-    env, ssh_command = await spin_up_environment(task_dir, daytona_api_key, agent_name, model_name, status_fn)
+    env, ssh_command = await spin_up_environment(
+        task_dir, daytona_api_key, agent_name, model_name, status_fn
+    )
     logs_dir = Path(tempfile.mkdtemp(prefix=f"{agent_name}_logs_"))
     agent, context = await install_and_get_agent(
         agent_name, logs_dir, model_name, env, status_fn
