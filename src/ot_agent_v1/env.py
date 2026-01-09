@@ -49,85 +49,158 @@ load_dotenv()
 
 DAYTONA_API_URL = "https://app.daytona.io/api"
 
-# Default model for all agents (Opus 4.5)
-DEFAULT_MODEL = "claude-opus-4-5-20251101"
-DEFAULT_MODEL_LITELLM = "anthropic/claude-opus-4-5-20251101"
-
 # Enable extended thinking for Claude Code (thinking traces)
-# Set to desired budget, e.g., 10000 tokens for thinking
 DEFAULT_MAX_THINKING_TOKENS = "10000"
 
-# Default Gemini model
-DEFAULT_GEMINI_MODEL = "gemini/gemini-3-flash-preview"
+# =============================================================================
+# MODEL CONFIGURATION
+# =============================================================================
+# Models by provider with different format options for different agents
+MODELS = {
+    "anthropic": {
+        "claude-opus-4-5-20251101": {
+            "display_name": "Claude Opus 4.5",
+            "direct": "claude-opus-4-5-20251101",  # For Claude Code
+            "litellm": "anthropic/claude-opus-4-5-20251101",  # For Terminus2, SWE agents
+            "cline": "anthropic:claude-opus-4-5-20251101",  # For Cline CLI
+        },
+        "claude-sonnet-4-5-20250929": {
+            "display_name": "Claude Sonnet 4.5",
+            "direct": "claude-sonnet-4-5-20250929",
+            "litellm": "anthropic/claude-sonnet-4-5-20250929",
+            "cline": "anthropic:claude-sonnet-4-5-20250929",
+        },
+    },
+    "openai": {
+        "gpt-5.2": {
+            "display_name": "GPT-5.2",
+            "direct": "gpt-5.2",
+            "litellm": "openai/gpt-5.2",
+            "cline": "openai:gpt-5.2",
+        },
+        "gpt-5.1-codex-max": {
+            "display_name": "GPT-5.1 Codex Max",
+            "direct": "gpt-5.1-codex-max",
+            "litellm": "openai/gpt-5.1-codex-max",
+            "cline": "openai:gpt-5.1-codex-max",
+        },
+    },
+    "gemini": {
+        "gemini-3-flash-preview": {
+            "display_name": "Gemini 3 Flash",
+            "direct": "gemini-3-flash-preview",
+            "litellm": "gemini/gemini-3-flash-preview",
+            "cline": "gemini:gemini-3-flash-preview",
+        },
+    },
+}
 
-# Default OpenAI model for Codex
-DEFAULT_OPENAI_MODEL = "gpt-5.1-codex-max"
+# Which providers each agent supports
+AGENT_PROVIDERS = {
+    "claude-code": ["anthropic"],  # Claude Code only works with Anthropic
+    "codex": ["openai"],  # Codex only works with OpenAI
+    "gemini-cli": ["gemini"],  # Gemini CLI only works with Gemini
+    "terminus-2": ["anthropic", "openai"],  # Supports multiple providers
+    "cline-cli": ["anthropic", "openai"],  # Supports multiple providers
+    "swe-agent": ["anthropic", "openai"],  # Supports multiple providers
+    "mini-swe-agent": ["anthropic", "openai"],  # Supports multiple providers
+    "cursor-cli": ["anthropic", "openai"],  # Supports multiple providers
+    "openhands": ["anthropic", "openai"],  # Supports multiple providers
+}
 
-# Default OpenHands model (LiteLLM format)
-DEFAULT_OPENHANDS_MODEL = "anthropic/claude-opus-4-5-20251101"
+# Model format type for each agent
+AGENT_MODEL_FORMAT = {
+    "claude-code": "direct",  # Uses direct model name
+    "codex": "direct",  # Uses direct model name
+    "gemini-cli": "litellm",  # Uses litellm format
+    "terminus-2": "litellm",  # Uses litellm format
+    "cline-cli": "cline",  # Uses cline format (provider:model)
+    "swe-agent": "litellm",  # Uses litellm format
+    "mini-swe-agent": "litellm",  # Uses litellm format
+    "cursor-cli": "litellm",  # Uses litellm format
+    "openhands": "litellm",  # Uses litellm format
+}
 
-# Default Cline model (format: provider:model-id)
-DEFAULT_CLINE_MODEL = "anthropic:claude-opus-4-5-20251101"
 
-# Default SWE Agent model (litellm format)
-DEFAULT_SWE_AGENT_MODEL = "anthropic/claude-opus-4-5-20251101"
+def get_models_for_agent(agent_name: str) -> list[tuple[str, str, str]]:
+    """
+    Get available models for an agent.
+    Returns list of (display_name, model_id, formatted_model_name)
+    """
+    providers = AGENT_PROVIDERS.get(agent_name, ["anthropic"])
+    model_format = AGENT_MODEL_FORMAT.get(agent_name, "litellm")
 
-# Agent configuration - display names and default models
+    models = []
+    for provider in providers:
+        provider_models = MODELS.get(provider, {})
+        for model_id, model_info in provider_models.items():
+            display_name = model_info["display_name"]
+            formatted_name = model_info.get(model_format, model_info["litellm"])
+            models.append((display_name, model_id, formatted_name))
+
+    return models
+
+
+def get_default_model_for_agent(agent_name: str) -> str:
+    """Get the default formatted model name for an agent."""
+    providers = AGENT_PROVIDERS.get(agent_name, ["anthropic"])
+    model_format = AGENT_MODEL_FORMAT.get(agent_name, "litellm")
+
+    # Default to first model of first provider
+    first_provider = providers[0]
+    first_model_id = list(MODELS[first_provider].keys())[0]
+    model_info = MODELS[first_provider][first_model_id]
+
+    return model_info.get(model_format, model_info["litellm"])
+
+
+# Agent configuration - display names and API keys
 # Using Harbor's AgentName values as keys
 # requires_tier3: True if agent uses uv/pip (requires Daytona Tier 3 for network access)
 AGENT_CONFIG = {
     "claude-code": {
         "display_name": "Claude Code",
         "api_key_env": "ANTHROPIC_API_KEY",
-        "default_model": DEFAULT_MODEL,  # Direct Anthropic format
         "requires_tier3": False,  # Uses npm
     },
     "terminus-2": {
         "display_name": "Terminus2",
         "api_key_env": "ANTHROPIC_API_KEY",
-        "default_model": DEFAULT_MODEL_LITELLM,  # LiteLLM format
         "requires_tier3": False,  # External agent, no container install
     },
     "cursor-cli": {
         "display_name": "Cursor CLI",
         "api_key_env": "CURSOR_API_KEY",
-        "default_model": DEFAULT_MODEL_LITELLM,  # LiteLLM format: provider/model
         "requires_tier3": True,  # Needs network for installation
     },
     "gemini-cli": {
         "display_name": "Gemini CLI",
         "api_key_env": "GEMINI_API_KEY",
-        "default_model": DEFAULT_GEMINI_MODEL,  # Gemini format
         "requires_tier3": False,  # Uses npm
     },
     "codex": {
         "display_name": "Codex (OpenAI)",
         "api_key_env": "OPENAI_API_KEY",
-        "default_model": DEFAULT_OPENAI_MODEL,  # OpenAI model name
         "requires_tier3": False,  # Uses npm
     },
     "openhands": {
         "display_name": "OpenHands",
-        "api_key_env": "ANTHROPIC_API_KEY",  # Uses LLM_API_KEY internally, derived from model
-        "default_model": DEFAULT_OPENHANDS_MODEL,  # LiteLLM format
+        "api_key_env": "ANTHROPIC_API_KEY",  # Derived from model provider
         "requires_tier3": True,  # Uses uv/pip
     },
     "cline-cli": {
         "display_name": "Cline CLI",
-        "api_key_env": "ANTHROPIC_API_KEY",  # We'll copy this to API_KEY for Cline
-        "default_model": DEFAULT_CLINE_MODEL,  # Format: provider:model-id
+        "api_key_env": "ANTHROPIC_API_KEY",  # Copied to API_KEY for Cline
         "requires_tier3": False,  # Uses npm
     },
     "swe-agent": {
         "display_name": "SWE Agent",
-        "api_key_env": "ANTHROPIC_API_KEY",  # Also supports OPENAI_API_KEY, TOGETHER_API_KEY
-        "default_model": DEFAULT_SWE_AGENT_MODEL,  # LiteLLM format
+        "api_key_env": "ANTHROPIC_API_KEY",  # Supports multiple providers
         "requires_tier3": True,  # Uses uv/pip
     },
     "mini-swe-agent": {
         "display_name": "Mini SWE Agent",
-        "api_key_env": "ANTHROPIC_API_KEY",  # Also supports MSWEA_API_KEY
-        "default_model": DEFAULT_SWE_AGENT_MODEL,  # LiteLLM format: provider/model
+        "api_key_env": "ANTHROPIC_API_KEY",  # Supports multiple providers
         "requires_tier3": True,  # Uses uv/pip
     },
 }
@@ -221,7 +294,7 @@ async def spin_up_environment(
 
     # Use agent-specific default model if not provided
     if model_name is None:
-        model_name = agent_config["default_model"]
+        model_name = get_default_model_for_agent(agent_name)
 
     # Set Daytona credentials
     os.environ["DAYTONA_API_KEY"] = daytona_api_key
@@ -609,7 +682,7 @@ async def run_agent(
     agent_display_name = agent_config["display_name"]
 
     if model_name is None:
-        model_name = agent_config["default_model"]
+        model_name = get_default_model_for_agent(agent_name)
 
     # Load task
     task = Task(task_dir)

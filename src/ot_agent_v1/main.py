@@ -20,6 +20,8 @@ from env import (
     run_agent,
     AGENT_CONFIG,
     SUPPORTED_AGENTS,
+    get_models_for_agent,
+    get_default_model_for_agent,
 )
 
 load_dotenv()
@@ -559,7 +561,7 @@ def render_rl_tab():
         # Header with task name and controls
         st.subheader(f"Task: {task['path']}")
 
-        # Agent selection and Start button
+        # Agent selection, Model selection, and Start button
         control_col1, control_col2, control_col3 = st.columns([2, 2, 1])
         with control_col1:
             # Build agent options from AGENT_CONFIG (display_name -> agent_name)
@@ -583,13 +585,28 @@ def render_rl_tab():
                 help="⚠️ = Requires Daytona Tier 3 (uv/pip network access)",
             )
             selected_agent_name = agent_options[selected_display_name]
-        with control_col2:
-            # Show API key requirement for selected agent
+
+            # Show API key requirement
             agent_config = AGENT_CONFIG[selected_agent_name]
             api_key_env = agent_config["api_key_env"]
-            default_model = agent_config["default_model"]
             st.caption(f"**Requires:** `{api_key_env}`")
-            st.caption(f"**Model:** `{default_model}`")
+
+        with control_col2:
+            # Model selection based on selected agent
+            available_models = get_models_for_agent(selected_agent_name)
+            model_options = {
+                model_info[0]: model_info[2]  # display_name -> formatted_model_name
+                for model_info in available_models
+            }
+            selected_model_display = st.selectbox(
+                "Model",
+                options=list(model_options.keys()),
+                index=0,
+                key="model_select",
+            )
+            selected_model = model_options[selected_model_display]
+            st.caption(f"**Using:** `{selected_model}`")
+
         with control_col3:
             start_task_clicked = st.button(
                 "🚀 Start Task",
@@ -632,6 +649,7 @@ def render_rl_tab():
                 st.session_state.task_binary = task_binary
                 st.session_state.task_path = task["path"]
                 st.session_state.selected_agent_name = selected_agent_name
+                st.session_state.selected_model = selected_model
 
         # API Key dialog (fallback if not set in sidebar)
         if st.session_state.get("show_api_key_dialog", False):
@@ -656,6 +674,7 @@ def render_rl_tab():
                             st.session_state.task_binary = task_binary
                             st.session_state.task_path = task["path"]
                             st.session_state.selected_agent_name = selected_agent_name
+                            st.session_state.selected_model = selected_model
                             st.rerun()
                         else:
                             st.error(
@@ -672,6 +691,9 @@ def render_rl_tab():
             task_binary_to_use = st.session_state.get("task_binary", task_binary)
             agent_name_to_use = st.session_state.get(
                 "selected_agent_name", "claude-code"
+            )
+            model_to_use = st.session_state.get(
+                "selected_model", get_default_model_for_agent(agent_name_to_use)
             )
             agent_display_name = AGENT_CONFIG[agent_name_to_use]["display_name"]
 
@@ -693,6 +715,7 @@ def render_rl_tab():
                         instruction = "Complete the task in this environment."
 
                     st.write(f"**Agent:** {agent_name_to_use}")
+                    st.write(f"**Model:** {model_to_use}")
                     st.write(f"**Goal:** {instruction[:300]}...")
 
                     try:
@@ -713,6 +736,7 @@ def render_rl_tab():
                                         instruction=instruction,
                                         daytona_api_key=daytona_key,
                                         agent_name=agent_name_to_use,
+                                        model_name=model_to_use,
                                         status_log=status_log,
                                     )
                                 )
