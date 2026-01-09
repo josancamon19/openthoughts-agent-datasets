@@ -5,7 +5,11 @@ OpenThoughts Agent Datasets Dashboard
 import io
 import os
 import tarfile
+import threading
+import time
+import traceback
 
+import pandas as pd
 import streamlit as st
 from datasets import load_dataset
 from dotenv import load_dotenv
@@ -366,8 +370,6 @@ def render_sft_tab():
             }
         )
 
-    import pandas as pd
-
     df = pd.DataFrame(table_data)
 
     event = st.dataframe(
@@ -516,8 +518,6 @@ def render_rl_tab():
                 "size": f"{task['binary_size']:,} bytes",
             }
         )
-
-    import pandas as pd
 
     df = pd.DataFrame(table_data)
 
@@ -671,9 +671,6 @@ def render_rl_tab():
                     st.write(f"**Goal:** {instruction[:300]}...")
 
                     try:
-                        import threading
-                        import time
-
                         # Capture values before thread (st.session_state not accessible in thread)
                         daytona_key = st.session_state.daytona_api_key
 
@@ -737,8 +734,6 @@ def render_rl_tab():
                     except Exception as e:
                         task_status.update(label="❌ Task failed", state="error")
                         st.error(f"Error: {e}")
-                        import traceback
-
                         st.code(traceback.format_exc(), language=None)
 
         # Show agent result with trajectory
@@ -791,12 +786,22 @@ def render_rl_tab():
                     st.markdown("### 📜 Agent Trajectory")
                     # Handle both "steps" (terminus-2) and "events" (claude-code fallback) formats
                     steps = trajectory.get("steps") or trajectory.get("events", [])
+                    
+                    # Debug: show what we're working with
+                    print(f"[UI DEBUG] trajectory keys: {trajectory.keys()}")
+                    print(f"[UI DEBUG] num steps: {len(steps)}")
+                    if steps:
+                        print(f"[UI DEBUG] first step keys: {steps[0].keys()}")
 
                     # Filter and count meaningful events
+                    # For ATIF format, use 'source' field; for Claude Code, use 'type' field
                     meaningful_events = [
-                        s for s in steps if s.get("type") not in ("system", "result")
+                        s for s in steps 
+                        if s.get("type") not in ("system", "result")
+                        and s.get("source") not in ("system",)
                     ]
-                    st.caption(f"{len(meaningful_events)} turns")
+                    st.caption(f"{len(meaningful_events)} turns (raw: {len(steps)} steps)")
+                    print(f"[UI DEBUG] meaningful_events count: {len(meaningful_events)}, raw steps: {len(steps)}")
 
                     for step in steps:
                         event_type = step.get("type", "unknown")

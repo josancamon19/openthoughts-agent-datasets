@@ -26,9 +26,11 @@ Uses Harbor's AgentFactory to support multiple agents dynamically.
 """
 
 import asyncio
+import concurrent.futures
 import io
 import json
 import os
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -37,10 +39,11 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 from harbor.agents.factory import AgentFactory, AgentName
+from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.environments.daytona import DaytonaEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.task.task import Task
-from harbor.models.trial.paths import EnvironmentPaths
+from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
 
 load_dotenv()
 
@@ -54,6 +57,9 @@ DEFAULT_MODEL_LITELLM = "anthropic/claude-opus-4-5-20251101"
 # Set to desired budget, e.g., 10000 tokens for thinking
 DEFAULT_MAX_THINKING_TOKENS = "10000"
 
+# Default Gemini model
+DEFAULT_GEMINI_MODEL = "gemini/gemini-3-flash-preview"
+
 # Agent configuration - display names and default models
 # Using Harbor's AgentName values as keys
 AGENT_CONFIG = {
@@ -66,6 +72,11 @@ AGENT_CONFIG = {
         "display_name": "Terminus2",
         "api_key_env": "ANTHROPIC_API_KEY",
         "default_model": DEFAULT_MODEL_LITELLM,  # LiteLLM format
+    },
+    "gemini-cli": {
+        "display_name": "Gemini CLI",
+        "api_key_env": "GEMINI_API_KEY",
+        "default_model": DEFAULT_GEMINI_MODEL,  # Gemini format
     },
 }
 
@@ -93,10 +104,6 @@ async def create_harbor_daytona_env(api_key: str, task_dir: Path) -> dict:
     # Set Daytona credentials in environment
     os.environ["DAYTONA_API_KEY"] = api_key
     os.environ["DAYTONA_API_URL"] = DAYTONA_API_URL
-
-    from harbor.environments.daytona import DaytonaEnvironment
-    from harbor.models.task.task import Task
-    from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
 
     # Load task using Harbor's Task class
     task = Task(task_dir)
@@ -147,8 +154,6 @@ def get_agent_config(agent_name: str) -> dict:
 
 def is_installed_agent(agent) -> bool:
     """Check if an agent is an installed agent (runs inside container)."""
-    from harbor.agents.installed.base import BaseInstalledAgent
-
     return isinstance(agent, BaseInstalledAgent)
 
 
@@ -178,11 +183,6 @@ async def spin_up_environment(
     api_key_env = agent_config["api_key_env"]
     if not os.environ.get(api_key_env):
         raise ValueError(f"{api_key_env} not set in environment")
-
-    # Import Harbor components
-    from harbor.environments.daytona import DaytonaEnvironment
-    from harbor.models.task.task import Task
-    from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
 
     # Load task
     task = Task(task_dir)
@@ -285,10 +285,16 @@ async def convert_logs_to_trajectory(
 
     # Let the agent convert its native logs to trajectory.json
     try:
+        print(f"[DEBUG] agent.logs_dir = {agent.logs_dir}")
+        print(f"[DEBUG] our logs_dir = {logs_dir}")
+        print(f"[DEBUG] Before populate_context_post_run, logs_dir contents: {list(logs_dir.iterdir()) if logs_dir.exists() else 'dir not found'}")
         agent.populate_context_post_run(context)
         print("[DEBUG] populate_context_post_run completed")
+        print(f"[DEBUG] After populate_context_post_run, logs_dir contents: {list(logs_dir.iterdir()) if logs_dir.exists() else 'dir not found'}")
     except Exception as e:
         print(f"[DEBUG] populate_context_post_run failed: {e}")
+        import traceback
+        traceback.print_exc()
 
     # Fallback: If trajectory.json wasn't created, try to convert claude-code.txt
     trajectory_path = logs_dir / "trajectory.json"
@@ -348,9 +354,15 @@ async def run_verification(env, status_fn: Callable[[str], None], logs_dir: Path
     # Load trajectory if available
     trajectory = None
     trajectory_path = logs_dir / "trajectory.json"
+    print(f"[DEBUG] Looking for trajectory at: {trajectory_path}")
+    print(f"[DEBUG] logs_dir contents: {list(logs_dir.iterdir()) if logs_dir.exists() else 'dir not found'}")
     if trajectory_path.exists():
+        print("[DEBUG] Found trajectory.json, loading...")
         with open(trajectory_path) as f:
             trajectory = json.load(f)
+        print(f"[DEBUG] Loaded trajectory with keys: {trajectory.keys() if trajectory else 'None'}")
+    else:
+        print(f"[DEBUG] trajectory.json NOT FOUND at {trajectory_path}")
 
     return trajectory, test_passed, test_output
 
@@ -438,9 +450,6 @@ def run_async(coro):
     Always runs in a fresh thread to avoid event loop caching issues
     with the Daytona SDK between Streamlit reruns.
     """
-    import concurrent.futures
-    import sys
-
     # Clear cached modules that might hold stale event loop references
     modules_to_clear = [
         k
