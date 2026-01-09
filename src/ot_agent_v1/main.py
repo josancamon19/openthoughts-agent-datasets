@@ -599,7 +599,9 @@ def render_rl_tab():
             if not st.session_state.get("daytona_api_key"):
                 st.session_state.show_api_key_dialog = True
             elif not os.environ.get(required_api_key):
-                st.error(f"{required_api_key} not found in .env (required for {selected_display_name})")
+                st.error(
+                    f"{required_api_key} not found in .env (required for {selected_display_name})"
+                )
             else:
                 st.session_state.running_task = True
                 st.session_state.task_binary = task_binary
@@ -643,10 +645,14 @@ def render_rl_tab():
         if st.session_state.get("running_task", False):
             st.session_state.running_task = False
             task_binary_to_use = st.session_state.get("task_binary", task_binary)
-            agent_name_to_use = st.session_state.get("selected_agent_name", "claude-code")
+            agent_name_to_use = st.session_state.get(
+                "selected_agent_name", "claude-code"
+            )
             agent_display_name = AGENT_CONFIG[agent_name_to_use]["display_name"]
 
-            with st.status(f"Starting task with {agent_display_name}...", expanded=True) as task_status:
+            with st.status(
+                f"Starting task with {agent_display_name}...", expanded=True
+            ) as task_status:
                 st.write("Extracting task files...")
                 task_dir = extract_task_to_tempdir(task_binary_to_use)
 
@@ -752,7 +758,9 @@ def render_rl_tab():
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.markdown(f"**Task:** `{result['task_name']}`")
-                    st.markdown(f"**Agent:** `{result.get('agent_display_name', 'Unknown')}`")
+                    st.markdown(
+                        f"**Agent:** `{result.get('agent_display_name', 'Unknown')}`"
+                    )
                     st.markdown(f"**Model:** `{result.get('model_name', 'Unknown')}`")
                 with col2:
                     ctx = result.get("context", {})
@@ -783,17 +791,16 @@ def render_rl_tab():
                     st.markdown("### 📜 Agent Trajectory")
                     # Handle both "steps" (terminus-2) and "events" (claude-code fallback) formats
                     steps = trajectory.get("steps") or trajectory.get("events", [])
-                    
+
                     # Filter and count meaningful events
                     meaningful_events = [
-                        s for s in steps
-                        if s.get("type") not in ("system", "result")
+                        s for s in steps if s.get("type") not in ("system", "result")
                     ]
                     st.caption(f"{len(meaningful_events)} turns")
 
                     for step in steps:
                         event_type = step.get("type", "unknown")
-                        
+
                         # Skip system init and result events
                         if event_type == "system":
                             continue
@@ -802,7 +809,7 @@ def render_rl_tab():
 
                         # Parse message content based on event type
                         raw_message = step.get("message", {})
-                        
+
                         if event_type == "assistant" and isinstance(raw_message, dict):
                             # Assistant message: extract text, thinking, and tool calls from content array
                             content_items = raw_message.get("content", [])
@@ -810,75 +817,120 @@ def render_rl_tab():
                                 for item in content_items:
                                     if isinstance(item, dict):
                                         item_type = item.get("type", "")
-                                        
+
                                         # Handle thinking/reasoning blocks
-                                        if item_type in ("thinking", "reasoning", "analysis"):
+                                        if item_type in (
+                                            "thinking",
+                                            "reasoning",
+                                            "analysis",
+                                        ):
                                             thinking_text = item.get("text", "")
                                             if thinking_text.strip():
-                                                st.markdown('<div class="msg-assistant"><div class="msg-role">🤖 assistant</div></div>', unsafe_allow_html=True)
-                                                with st.expander("💭 Thinking", expanded=True):
+                                                st.markdown(
+                                                    '<div class="msg-assistant"><div class="msg-role">🤖 assistant</div></div>',
+                                                    unsafe_allow_html=True,
+                                                )
+                                                with st.expander(
+                                                    "💭 Thinking", expanded=True
+                                                ):
                                                     st.markdown(thinking_text)
-                                        
+
                                         elif item_type == "text":
                                             text = item.get("text", "")
                                             if text.strip():
-                                                st.markdown('<div class="msg-assistant"><div class="msg-role">🤖 assistant</div></div>', unsafe_allow_html=True)
+                                                st.markdown(
+                                                    '<div class="msg-assistant"><div class="msg-role">🤖 assistant</div></div>',
+                                                    unsafe_allow_html=True,
+                                                )
                                                 st.markdown(text)
-                                        
+
                                         elif item_type == "tool_use":
                                             tool_name = item.get("name", "unknown")
                                             tool_input = item.get("input", {})
-                                            st.markdown('<div class="msg-assistant"><div class="msg-role">🤖 assistant</div></div>', unsafe_allow_html=True)
+                                            st.markdown(
+                                                '<div class="msg-assistant"><div class="msg-role">🤖 assistant</div></div>',
+                                                unsafe_allow_html=True,
+                                            )
                                             st.markdown(f"**🔧 Tool:** `{tool_name}`")
                                             if tool_input:
                                                 st.json(tool_input)
-                        
+
                         elif event_type == "user" and isinstance(raw_message, dict):
                             # User message: typically tool results
                             content_items = raw_message.get("content", [])
                             if isinstance(content_items, list):
                                 for item in content_items:
-                                    if isinstance(item, dict) and item.get("type") == "tool_result":
+                                    if (
+                                        isinstance(item, dict)
+                                        and item.get("type") == "tool_result"
+                                    ):
                                         tool_output = item.get("content", "")
                                         is_error = item.get("is_error", False)
                                         if tool_output:
-                                            st.markdown('<div class="msg-user"><div class="msg-role">👤 user</div></div>', unsafe_allow_html=True)
-                                            label = "❌ Error" if is_error else "📤 Output"
+                                            st.markdown(
+                                                '<div class="msg-user"><div class="msg-role">👤 user</div></div>',
+                                                unsafe_allow_html=True,
+                                            )
+                                            label = (
+                                                "❌ Error" if is_error else "📤 Output"
+                                            )
                                             with st.expander(label, expanded=False):
                                                 if len(tool_output) > 2000:
-                                                    st.code(tool_output[:2000] + "\n... (truncated)", language=None)
+                                                    st.code(
+                                                        tool_output[:2000]
+                                                        + "\n... (truncated)",
+                                                        language=None,
+                                                    )
                                                 else:
                                                     st.code(tool_output, language=None)
-                        
-                        # Handle terminus-2 format (source/message/tool_calls/observation)
+
+                        # Handle ATIF format (source/message/reasoning_content/tool_calls/observation)
+                        # Works for: Terminus2, SweAgent, OpenHands, GeminiCli, MiniSweAgent
                         elif step.get("source"):
                             source = step.get("source")
                             message = step.get("message", "")
+                            reasoning = step.get("reasoning_content", "")
                             tool_calls = step.get("tool_calls", [])
-                            
+
                             # Only render if there's content
-                            if message or tool_calls:
+                            if message or reasoning or tool_calls:
                                 if source == "agent":
-                                    st.markdown('<div class="msg-assistant"><div class="msg-role">🤖 agent</div></div>', unsafe_allow_html=True)
+                                    st.markdown(
+                                        '<div class="msg-assistant"><div class="msg-role">🤖 agent</div></div>',
+                                        unsafe_allow_html=True,
+                                    )
                                 elif source == "user":
-                                    st.markdown('<div class="msg-user"><div class="msg-role">👤 user</div></div>', unsafe_allow_html=True)
+                                    st.markdown(
+                                        '<div class="msg-user"><div class="msg-role">👤 user</div></div>',
+                                        unsafe_allow_html=True,
+                                    )
                                 else:
-                                    st.markdown(f'<div class="msg-system"><div class="msg-role">⚙️ {source}</div></div>', unsafe_allow_html=True)
-                            
+                                    st.markdown(
+                                        f'<div class="msg-system"><div class="msg-role">⚙️ {source}</div></div>',
+                                        unsafe_allow_html=True,
+                                    )
+
+                            # Show reasoning/thinking first (if present)
+                            if reasoning:
+                                with st.expander("💭 Thinking", expanded=True):
+                                    st.markdown(reasoning)
+
                             if message:
                                 if len(message) > 1000:
-                                    with st.expander(f"View message ({len(message):,} chars)"):
+                                    with st.expander(
+                                        f"View message ({len(message):,} chars)"
+                                    ):
                                         st.code(message, language=None)
                                 else:
-                                    st.code(message, language=None)
-                            
+                                    st.markdown(message)
+
                             for tc in tool_calls:
                                 fn_name = tc.get("function_name", "unknown")
                                 args = tc.get("arguments", {})
                                 st.markdown(f"**🔧 Tool:** `{fn_name}`")
                                 if args:
                                     st.json(args)
-                            
+
                             obs = step.get("observation")
                             if obs and obs.get("results"):
                                 for r in obs["results"]:
