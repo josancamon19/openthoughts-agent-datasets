@@ -66,6 +66,9 @@ DEFAULT_OPENAI_MODEL = "gpt-5.1-codex-max"
 # Default OpenHands model (LiteLLM format)
 DEFAULT_OPENHANDS_MODEL = "anthropic/claude-opus-4-5-20251101"
 
+# Default Cline model (format: provider:model-id)
+DEFAULT_CLINE_MODEL = "anthropic:claude-opus-4-5-20251101"
+
 # Agent configuration - display names and default models
 # Using Harbor's AgentName values as keys
 AGENT_CONFIG = {
@@ -98,6 +101,11 @@ AGENT_CONFIG = {
         "display_name": "OpenHands",
         "api_key_env": "ANTHROPIC_API_KEY",  # Uses LLM_API_KEY internally, derived from model
         "default_model": DEFAULT_OPENHANDS_MODEL,  # LiteLLM format
+    },
+    "cline-cli": {
+        "display_name": "Cline CLI",
+        "api_key_env": "ANTHROPIC_API_KEY",  # We'll copy this to API_KEY for Cline
+        "default_model": DEFAULT_CLINE_MODEL,  # Format: provider:model-id
     },
 }
 
@@ -204,6 +212,10 @@ async def spin_up_environment(
     api_key_env = agent_config["api_key_env"]
     if not os.environ.get(api_key_env):
         raise ValueError(f"{api_key_env} not set in environment")
+
+    # Cline CLI expects API_KEY env var, copy from ANTHROPIC_API_KEY
+    if agent_name == "cline-cli" and os.environ.get("ANTHROPIC_API_KEY"):
+        os.environ["API_KEY"] = os.environ["ANTHROPIC_API_KEY"]
 
     # Load task
     task = Task(task_dir)
@@ -386,6 +398,31 @@ async def convert_logs_to_trajectory(
                     )
                 except Exception as e:
                     print(f"[DEBUG] Failed to convert cursor-cli.txt: {e}")
+
+        # Try cline.txt if still no trajectory
+        if not trajectory_path.exists():
+            cline_txt = logs_dir / "cline.txt"
+            if cline_txt.exists():
+                print(
+                    "[DEBUG] trajectory.json not found, using cline.txt as fallback"
+                )
+                try:
+                    content = cline_txt.read_text()
+                    # cline.txt is raw output, wrap it as a single event
+                    with open(trajectory_path, "w") as f:
+                        json.dump(
+                            {
+                                "events": [{"type": "output", "content": content}],
+                                "source": "cline.txt",
+                            },
+                            f,
+                            indent=2,
+                        )
+                    print(
+                        f"[DEBUG] Created trajectory.json from cline.txt ({len(content)} chars)"
+                    )
+                except Exception as e:
+                    print(f"[DEBUG] Failed to convert cline.txt: {e}")
 
         # Try openhands.trajectory.json if still no trajectory (native OpenHands format)
         if not trajectory_path.exists():

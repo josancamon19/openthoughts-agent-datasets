@@ -1008,6 +1008,18 @@ def render_rl_tab():
                                     if content:
                                         with st.expander("📤 Tool output"):
                                             st.code(content[:2000], language=None)
+
+                        # Handle raw output format (from cline.txt, cursor-cli.txt, etc.)
+                        elif event_type == "output":
+                            content = step.get("content", "")
+                            if content:
+                                st.markdown(
+                                    '<div class="msg-assistant"><div class="msg-role">📜 Raw Agent Output</div></div>',
+                                    unsafe_allow_html=True,
+                                )
+                                # Show the full output in an expander
+                                with st.expander(f"View output ({len(content):,} chars)", expanded=True):
+                                    st.code(content, language=None)
                 else:
                     st.warning("No trajectory data available")
                     # Show raw output for debugging
@@ -1120,6 +1132,18 @@ def render_sidebar():
         if gemini_key:
             os.environ["GEMINI_API_KEY"] = gemini_key
         
+        # Cursor
+        cursor_key = st.text_input(
+            "Cursor API Key",
+            value=os.environ.get("CURSOR_API_KEY", ""),
+            type="password",
+            key="sidebar_cursor_key",
+            placeholder="cursor_...",
+            help="For Cursor CLI",
+        )
+        if cursor_key:
+            os.environ["CURSOR_API_KEY"] = cursor_key
+        
         st.divider()
         
         # Status indicators
@@ -1136,6 +1160,7 @@ def render_sidebar():
         key_status("Anthropic", "ANTHROPIC_API_KEY", "sk-ant-")
         key_status("OpenAI", "OPENAI_API_KEY", "sk-")
         key_status("Gemini", "GEMINI_API_KEY", "AIza")
+        key_status("Cursor", "CURSOR_API_KEY", "")
         
         # Also set Daytona from session state to env
         if st.session_state.get("daytona_api_key"):
