@@ -781,52 +781,111 @@ def render_rl_tab():
                 trajectory = result.get("trajectory")
                 if trajectory:
                     st.markdown("### 📜 Agent Trajectory")
-                    steps = trajectory.get("steps", [])
-                    st.caption(f"{len(steps)} steps")
+                    # Handle both "steps" (terminus-2) and "events" (claude-code fallback) formats
+                    steps = trajectory.get("steps") or trajectory.get("events", [])
+                    
+                    # Filter and count meaningful events
+                    meaningful_events = [
+                        s for s in steps
+                        if s.get("type") not in ("system", "result")
+                    ]
+                    st.caption(f"{len(meaningful_events)} turns")
 
                     for step in steps:
-                        source = step.get("source", "unknown")
-                        message = step.get("message", "")
-                        tool_calls = step.get("tool_calls", [])
+                        event_type = step.get("type", "unknown")
+                        
+                        # Skip system init and result events
+                        if event_type == "system":
+                            continue
+                        if event_type == "result":
+                            continue
 
-                        if source == "agent":
-                            icon = "🤖"
-                            css_class = "msg-assistant"
-                        elif source == "user":
-                            icon = "👤"
-                            css_class = "msg-user"
-                        else:
-                            icon = "⚙️"
-                            css_class = "msg-system"
-
-                        st.markdown(
-                            f'<div class="{css_class}"><div class="msg-role">{icon} {source}</div></div>',
-                            unsafe_allow_html=True,
-                        )
-
-                        if message:
-                            if len(message) > 1000:
-                                with st.expander(
-                                    f"View message ({len(message):,} chars)"
-                                ):
+                        # Parse message content based on event type
+                        raw_message = step.get("message", {})
+                        
+                        if event_type == "assistant" and isinstance(raw_message, dict):
+                            # Assistant message: extract text, thinking, and tool calls from content array
+                            content_items = raw_message.get("content", [])
+                            if isinstance(content_items, list):
+                                for item in content_items:
+                                    if isinstance(item, dict):
+                                        item_type = item.get("type", "")
+                                        
+                                        # Handle thinking/reasoning blocks
+                                        if item_type in ("thinking", "reasoning", "analysis"):
+                                            thinking_text = item.get("text", "")
+                                            if thinking_text.strip():
+                                                st.markdown('<div class="msg-assistant"><div class="msg-role">🤖 assistant</div></div>', unsafe_allow_html=True)
+                                                with st.expander("💭 Thinking", expanded=True):
+                                                    st.markdown(thinking_text)
+                                        
+                                        elif item_type == "text":
+                                            text = item.get("text", "")
+                                            if text.strip():
+                                                st.markdown('<div class="msg-assistant"><div class="msg-role">🤖 assistant</div></div>', unsafe_allow_html=True)
+                                                st.markdown(text)
+                                        
+                                        elif item_type == "tool_use":
+                                            tool_name = item.get("name", "unknown")
+                                            tool_input = item.get("input", {})
+                                            st.markdown('<div class="msg-assistant"><div class="msg-role">🤖 assistant</div></div>', unsafe_allow_html=True)
+                                            st.markdown(f"**🔧 Tool:** `{tool_name}`")
+                                            if tool_input:
+                                                st.json(tool_input)
+                        
+                        elif event_type == "user" and isinstance(raw_message, dict):
+                            # User message: typically tool results
+                            content_items = raw_message.get("content", [])
+                            if isinstance(content_items, list):
+                                for item in content_items:
+                                    if isinstance(item, dict) and item.get("type") == "tool_result":
+                                        tool_output = item.get("content", "")
+                                        is_error = item.get("is_error", False)
+                                        if tool_output:
+                                            st.markdown('<div class="msg-user"><div class="msg-role">👤 user</div></div>', unsafe_allow_html=True)
+                                            label = "❌ Error" if is_error else "📤 Output"
+                                            with st.expander(label, expanded=False):
+                                                if len(tool_output) > 2000:
+                                                    st.code(tool_output[:2000] + "\n... (truncated)", language=None)
+                                                else:
+                                                    st.code(tool_output, language=None)
+                        
+                        # Handle terminus-2 format (source/message/tool_calls/observation)
+                        elif step.get("source"):
+                            source = step.get("source")
+                            message = step.get("message", "")
+                            tool_calls = step.get("tool_calls", [])
+                            
+                            # Only render if there's content
+                            if message or tool_calls:
+                                if source == "agent":
+                                    st.markdown('<div class="msg-assistant"><div class="msg-role">🤖 agent</div></div>', unsafe_allow_html=True)
+                                elif source == "user":
+                                    st.markdown('<div class="msg-user"><div class="msg-role">👤 user</div></div>', unsafe_allow_html=True)
+                                else:
+                                    st.markdown(f'<div class="msg-system"><div class="msg-role">⚙️ {source}</div></div>', unsafe_allow_html=True)
+                            
+                            if message:
+                                if len(message) > 1000:
+                                    with st.expander(f"View message ({len(message):,} chars)"):
+                                        st.code(message, language=None)
+                                else:
                                     st.code(message, language=None)
-                            else:
-                                st.code(message, language=None)
-
-                        for tc in tool_calls:
-                            fn_name = tc.get("function_name", "unknown")
-                            args = tc.get("arguments", {})
-                            st.markdown(f"**Tool:** `{fn_name}`")
-                            if args:
-                                st.json(args)
-
-                        obs = step.get("observation")
-                        if obs and obs.get("results"):
-                            for r in obs["results"]:
-                                content = r.get("content", "")
-                                if content:
-                                    with st.expander("📤 Tool output"):
-                                        st.code(content[:2000], language=None)
+                            
+                            for tc in tool_calls:
+                                fn_name = tc.get("function_name", "unknown")
+                                args = tc.get("arguments", {})
+                                st.markdown(f"**🔧 Tool:** `{fn_name}`")
+                                if args:
+                                    st.json(args)
+                            
+                            obs = step.get("observation")
+                            if obs and obs.get("results"):
+                                for r in obs["results"]:
+                                    content = r.get("content", "")
+                                    if content:
+                                        with st.expander("📤 Tool output"):
+                                            st.code(content[:2000], language=None)
                 else:
                     st.warning("No trajectory data available")
                     # Show raw output for debugging

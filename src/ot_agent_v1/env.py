@@ -10,7 +10,6 @@ Uses Harbor's AgentFactory to support multiple agents dynamically.
 
 ### Installed Agents (run inside container):
 - claude-code: Full trajectory support (converts native JSONL → trajectory.json)
-- mini-swe-agent: Full trajectory support
 - swe-agent: Full trajectory support
 - openhands: Full trajectory support
 - gemini-cli: Full trajectory support
@@ -51,6 +50,10 @@ DAYTONA_API_URL = "https://app.daytona.io/api"
 DEFAULT_MODEL = "claude-opus-4-5-20251101"
 DEFAULT_MODEL_LITELLM = "anthropic/claude-opus-4-5-20251101"
 
+# Enable extended thinking for Claude Code (thinking traces)
+# Set to desired budget, e.g., 10000 tokens for thinking
+DEFAULT_MAX_THINKING_TOKENS = "10000"
+
 # Agent configuration - display names and default models
 # Using Harbor's AgentName values as keys
 AGENT_CONFIG = {
@@ -61,11 +64,6 @@ AGENT_CONFIG = {
     },
     "terminus-2": {
         "display_name": "Terminus2",
-        "api_key_env": "ANTHROPIC_API_KEY",
-        "default_model": DEFAULT_MODEL_LITELLM,  # LiteLLM format
-    },
-    "mini-swe-agent": {
-        "display_name": "Mini SWE Agent",
         "api_key_env": "ANTHROPIC_API_KEY",
         "default_model": DEFAULT_MODEL_LITELLM,  # LiteLLM format
     },
@@ -171,6 +169,10 @@ async def spin_up_environment(
     # Set Daytona credentials
     os.environ["DAYTONA_API_KEY"] = daytona_api_key
     os.environ["DAYTONA_API_URL"] = DAYTONA_API_URL
+
+    # Enable extended thinking for Claude Code (thinking traces)
+    if "MAX_THINKING_TOKENS" not in os.environ:
+        os.environ["MAX_THINKING_TOKENS"] = DEFAULT_MAX_THINKING_TOKENS
 
     # Verify API key based on agent requirements
     api_key_env = agent_config["api_key_env"]
@@ -288,6 +290,23 @@ async def convert_logs_to_trajectory(
     except Exception as e:
         print(f"[DEBUG] populate_context_post_run failed: {e}")
 
+    # Fallback: If trajectory.json wasn't created, try to convert claude-code.txt
+    trajectory_path = logs_dir / "trajectory.json"
+    if not trajectory_path.exists():
+        claude_code_txt = logs_dir / "claude-code.txt"
+        if claude_code_txt.exists():
+            print("[DEBUG] trajectory.json not found, using claude-code.txt as fallback")
+            try:
+                # claude-code.txt is JSONL format - convert to trajectory format
+                lines = claude_code_txt.read_text().strip().split("\n")
+                events = [json.loads(line) for line in lines if line.strip()]
+                # Save as trajectory.json
+                with open(trajectory_path, "w") as f:
+                    json.dump({"events": events, "source": "claude-code.txt"}, f, indent=2)
+                print(f"[DEBUG] Created trajectory.json from claude-code.txt ({len(events)} events)")
+            except Exception as e:
+                print(f"[DEBUG] Failed to convert claude-code.txt: {e}")
+
 
 async def run_verification(env, status_fn: Callable[[str], None], logs_dir: Path):
     status = status_fn
@@ -352,7 +371,7 @@ async def run_agent(
         instruction: The task instruction to give the agent
         daytona_api_key: Daytona API key
         agent_name: Harbor agent name (default: "claude-code")
-            Supported: "claude-code", "terminus-2", "mini-swe-agent"
+            Supported: "claude-code", "terminus-2"
         model_name: Model to use (default: agent-specific default)
         status_log: Optional list to collect status messages
 
@@ -360,6 +379,7 @@ async def run_agent(
         Dict with sandbox_id, trajectory, and agent context
     """
     agent_config = get_agent_config(agent_name)
+    agent_display_name = agent_config["display_name"]
 
     if model_name is None:
         model_name = agent_config["default_model"]
@@ -373,36 +393,19 @@ async def run_agent(
         print(f"[*] {msg}")
 
     status_fn = status
-    env, ssh_command = await spin_up_environment(task_dir, daytona_api_key, status_fn)
+    env, ssh_command = await spin_up_environment(task_dir, daytona_api_key, agent_name, model_name, status_fn)
     logs_dir = Path(tempfile.mkdtemp(prefix=f"{agent_name}_logs_"))
     agent, context = await install_and_get_agent(
         agent_name, logs_dir, model_name, env, status_fn
     )
-    agent_display_name = agent_config["display_name"]
 
     await run_installed_agent(agent, env, context, status_fn, instruction)
 
     # Collect agent trajectory
-    status("Collecting agent trajectory...")
     container_agent_dir = str(EnvironmentPaths.agent_dir)  # /logs/agent
-
     await convert_logs_to_trajectory(agent, env, context, logs_dir, container_agent_dir)
-    # if is_installed:
-    #     # For installed agents, download logs from container
-    #     # Then populate_context_post_run() will convert native format → trajectory.json
-    # else:
-    #     # External agents (like Terminus2) write trajectory directly to logs_dir
-    #     # The trajectory.json should already be in logs_dir
-    #     trajectory_path = logs_dir / "trajectory.json"
-    #     if trajectory_path.exists():
-    #         print(f"[DEBUG] Found trajectory at {trajectory_path}")
-    #     else:
-    #         print(f"[DEBUG] No trajectory.json found in {logs_dir}")
 
-    status("Agent run complete!")
-
-    # Run tests to verify the solution
-    status("Running verification tests...")
+    # Run verification (status messages are handled inside run_verification)
     trajectory, test_passed, test_output = await run_verification(
         env, status_fn, logs_dir
     )

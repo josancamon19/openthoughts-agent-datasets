@@ -1,5 +1,7 @@
 - [ ] have multiple agents, specially oss, terminus?
 - [ ] model selection for those agents
 - [ ] crowdsource the trajectories, upload to GCP?
-- [ ] when oss/retrieve logprobs for them to do RL?
+- [ ] when oss/retrieve logprobs for them to do offline RL?
 - [ ] pre-submit one for every combination
+- [ ] rub 3 in parallel for example? 
+- [ ] make a claude-code inspector for environments results?
