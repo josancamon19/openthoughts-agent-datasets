@@ -20,8 +20,8 @@ Uses Harbor's AgentFactory to support multiple agents dynamically.
 - Installed agents: Varies by agent (claude-code uses direct model name)
 
 ## Testing Agents
-- SSH into container to verify installation: `which claude`
-- Check install logs: `cat /installed-agent/install.sh`
+   - SSH into container to verify installation: `which claude`
+   - Check install logs: `cat /installed-agent/install.sh`
 - Check agent output: `ls -la /logs/agent/`
 """
 
@@ -74,51 +74,61 @@ DEFAULT_SWE_AGENT_MODEL = "anthropic/claude-opus-4-5-20251101"
 
 # Agent configuration - display names and default models
 # Using Harbor's AgentName values as keys
+# requires_tier3: True if agent uses uv/pip (requires Daytona Tier 3 for network access)
 AGENT_CONFIG = {
     "claude-code": {
         "display_name": "Claude Code",
         "api_key_env": "ANTHROPIC_API_KEY",
         "default_model": DEFAULT_MODEL,  # Direct Anthropic format
+        "requires_tier3": False,  # Uses npm
     },
     "terminus-2": {
         "display_name": "Terminus2",
         "api_key_env": "ANTHROPIC_API_KEY",
         "default_model": DEFAULT_MODEL_LITELLM,  # LiteLLM format
+        "requires_tier3": False,  # External agent, no container install
     },
     "cursor-cli": {
         "display_name": "Cursor CLI",
         "api_key_env": "CURSOR_API_KEY",
         "default_model": DEFAULT_MODEL_LITELLM,  # LiteLLM format: provider/model
+        "requires_tier3": True,  # Needs network for installation
     },
     "gemini-cli": {
         "display_name": "Gemini CLI",
         "api_key_env": "GEMINI_API_KEY",
         "default_model": DEFAULT_GEMINI_MODEL,  # Gemini format
+        "requires_tier3": False,  # Uses npm
     },
     "codex": {
         "display_name": "Codex (OpenAI)",
         "api_key_env": "OPENAI_API_KEY",
         "default_model": DEFAULT_OPENAI_MODEL,  # OpenAI model name
+        "requires_tier3": False,  # Uses npm
     },
     "openhands": {
         "display_name": "OpenHands",
         "api_key_env": "ANTHROPIC_API_KEY",  # Uses LLM_API_KEY internally, derived from model
         "default_model": DEFAULT_OPENHANDS_MODEL,  # LiteLLM format
+        "requires_tier3": True,  # Uses uv/pip
     },
     "cline-cli": {
         "display_name": "Cline CLI",
         "api_key_env": "ANTHROPIC_API_KEY",  # We'll copy this to API_KEY for Cline
         "default_model": DEFAULT_CLINE_MODEL,  # Format: provider:model-id
+        "requires_tier3": False,  # Uses npm
     },
     "swe-agent": {
         "display_name": "SWE Agent",
         "api_key_env": "ANTHROPIC_API_KEY",  # Also supports OPENAI_API_KEY, TOGETHER_API_KEY
         "default_model": DEFAULT_SWE_AGENT_MODEL,  # LiteLLM format
+        "requires_tier3": True,  # Uses uv/pip
     },
     "mini-swe-agent": {
         "display_name": "Mini SWE Agent",
         "api_key_env": "ANTHROPIC_API_KEY",  # Also supports MSWEA_API_KEY
         "default_model": DEFAULT_SWE_AGENT_MODEL,  # LiteLLM format: provider/model
+        "requires_tier3": True,  # Uses uv/pip
     },
 }
 

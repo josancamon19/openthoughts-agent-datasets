@@ -563,8 +563,16 @@ def render_rl_tab():
         control_col1, control_col2, control_col3 = st.columns([2, 2, 1])
         with control_col1:
             # Build agent options from AGENT_CONFIG (display_name -> agent_name)
+            # Add ⚠️ for agents requiring Daytona Tier 3 (uv/pip install)
+            def format_agent_display(agent_name: str) -> str:
+                config = AGENT_CONFIG[agent_name]
+                name = config["display_name"]
+                if config.get("requires_tier3", False):
+                    return f"⚠️ {name}"
+                return name
+            
             agent_options = {
-                AGENT_CONFIG[agent_name]["display_name"]: agent_name
+                format_agent_display(agent_name): agent_name
                 for agent_name in SUPPORTED_AGENTS
             }
             selected_display_name = st.selectbox(
@@ -572,6 +580,7 @@ def render_rl_tab():
                 options=list(agent_options.keys()),
                 index=0,
                 key="agent_harness_select",
+                help="⚠️ = Requires Daytona Tier 3 (uv/pip network access)"
             )
             selected_agent_name = agent_options[selected_display_name]
         with control_col2:
@@ -587,6 +596,14 @@ def render_rl_tab():
                 type="primary",
                 key="start_task_btn",
                 use_container_width=True,
+            )
+
+        # Show Daytona tier warning for agents that need it
+        if AGENT_CONFIG[selected_agent_name].get("requires_tier3", False):
+            st.warning(
+                "⚠️ **Daytona Tier 3 Required** — This agent uses `uv`/`pip` for installation, "
+                "which requires network access during setup. Daytona's free tier blocks outbound "
+                "network requests, causing installation to fail. Upgrade to Tier 3 or use a non-⚠️ agent."
             )
 
         # Decode the binary
