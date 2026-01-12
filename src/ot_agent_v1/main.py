@@ -30,6 +30,45 @@ from evaluator import stream_debug_agent
 
 load_dotenv()
 
+
+def init_api_keys_from_env():
+    """Initialize session_state API keys from .env (only once per session)."""
+    if "api_keys_initialized" not in st.session_state:
+        st.session_state.api_keys_initialized = True
+        # Load from .env if available (for local dev)
+        for key in [
+            "DAYTONA_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "CURSOR_API_KEY",
+        ]:
+            env_value = os.environ.get(key, "")
+            session_key = key.lower()
+            if session_key not in st.session_state:
+                st.session_state[session_key] = env_value
+
+
+def sync_api_keys_to_env():
+    """Sync session_state API keys to os.environ (for task execution)."""
+    for key in [
+        "DAYTONA_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "CURSOR_API_KEY",
+    ]:
+        session_key = key.lower()
+        value = st.session_state.get(session_key, "")
+        if value:
+            os.environ[key] = value
+
+
+def get_api_key(env_var: str) -> str:
+    """Get API key from session_state (browser-side storage)."""
+    return st.session_state.get(env_var.lower(), "")
+
+
 st.set_page_config(
     page_title="OpenThoughts Agent",
     page_icon="🧠",
@@ -627,12 +666,12 @@ def render_rl_tab():
         st.divider()
 
         # Build agent options from AGENT_CONFIG (display_name -> agent_name)
-        # Add ⚠️ for agents requiring Daytona Tier 3 (uv/pip install)
+        # Add * for agents requiring Daytona Tier 3 (uv/pip install)
         def format_agent_display(agent_name: str) -> str:
             config = AGENT_CONFIG[agent_name]
             name = config["display_name"]
             if config.get("requires_tier3", False):
-                return f"⚠️ {name}"
+                return f"{name} *"
             return name
 
         agent_options = {
@@ -664,7 +703,7 @@ def render_rl_tab():
                     options=list(agent_options.keys()),
                     index=0,
                     key="agent_harness_select",
-                    help="⚠️ = Requires Daytona Tier 3 (uv/pip network access)",
+                    help="* = Requires Daytona Tier 3 (uv/pip network access)",
                 )
                 selected_agent_name = agent_options[selected_display_name]
 
@@ -690,8 +729,8 @@ def render_rl_tab():
             )
             required_api_key_env = provider_config["api_key_env"]
 
-            # Check if API key is set
-            api_key_set = bool(os.environ.get(required_api_key_env))
+            # Check if API key is set (from session_state, browser-side)
+            api_key_set = bool(get_api_key(required_api_key_env))
             api_key_status = "✅" if api_key_set else "❌"
 
             st.markdown(
@@ -708,7 +747,7 @@ def render_rl_tab():
                 st.warning(
                     "⚠️ **Daytona Tier 3 Required** — This agent uses `uv`/`pip` for installation, "
                     "which requires network access during setup. Daytona's free tier blocks outbound "
-                    "network requests, causing installation to fail. Upgrade to Tier 3 or use a non-⚠️ agent."
+                    "network requests, causing installation to fail. Upgrade to Tier 3 or use a non-* agent."
                 )
 
         # Decode the binary
@@ -718,11 +757,6 @@ def render_rl_tab():
 
         # Handle Start Task button
         if start_task_clicked:
-            # Check API keys
-            env_api_key = os.environ.get("DAYTONA_API_KEY")
-            if env_api_key:
-                st.session_state.daytona_api_key = env_api_key
-
             # Get the required API key based on model provider (dynamic detection)
             model_provider = get_provider_from_model(
                 selected_model, selected_agent_name
@@ -732,11 +766,11 @@ def render_rl_tab():
             )
             required_api_key = model_provider_config["api_key_env"]
 
-            if not st.session_state.get("daytona_api_key"):
+            if not get_api_key("DAYTONA_API_KEY"):
                 st.session_state.show_api_key_dialog = True
-            elif not os.environ.get(required_api_key):
+            elif not get_api_key(required_api_key):
                 st.error(
-                    f"{required_api_key} not set. Add it in the sidebar or .env file (required for {model_provider} provider)"
+                    f"{required_api_key} not set. Add it in the sidebar (required for {model_provider} provider)"
                 )
             else:
                 st.session_state.running_task = True
@@ -813,6 +847,10 @@ def render_rl_tab():
                     st.write(f"**Goal:** {instruction[:300]}...")
 
                     try:
+                        # Sync API keys from session_state to os.environ for task execution
+                        # (env.py reads from os.environ, but we store in session_state for browser isolation)
+                        sync_api_keys_to_env()
+
                         # Capture values before thread (st.session_state not accessible in thread)
                         daytona_key = st.session_state.daytona_api_key
 
@@ -1352,9 +1390,7 @@ def render_sidebar():
         st.markdown("**Daytona** (required)")
         daytona_key = st.text_input(
             "Daytona API Key",
-            value=st.session_state.get(
-                "daytona_api_key", os.environ.get("DAYTONA_API_KEY", "")
-            ),
+            value=st.session_state.get("daytona_api_key", ""),
             type="password",
             key="sidebar_daytona_key",
             placeholder="dtn_...",
@@ -1365,56 +1401,57 @@ def render_sidebar():
 
         st.divider()
 
-        # Agent API Keys
+        # Agent API Keys (stored in session_state - browser-side, never saved to .env)
         st.markdown("**Agent API Keys**")
+        st.caption("🔒 Keys stored in browser session only")
 
         # Anthropic (Claude Code, Terminus2)
         anthropic_key = st.text_input(
             "Anthropic API Key",
-            value=os.environ.get("ANTHROPIC_API_KEY", ""),
+            value=st.session_state.get("anthropic_api_key", ""),
             type="password",
             key="sidebar_anthropic_key",
             placeholder="sk-ant-...",
             help="For Claude Code and Terminus2",
         )
         if anthropic_key:
-            os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+            st.session_state.anthropic_api_key = anthropic_key
 
         # OpenAI (Codex)
         openai_key = st.text_input(
             "OpenAI API Key",
-            value=os.environ.get("OPENAI_API_KEY", ""),
+            value=st.session_state.get("openai_api_key", ""),
             type="password",
             key="sidebar_openai_key",
             placeholder="sk-...",
             help="For Codex",
         )
         if openai_key:
-            os.environ["OPENAI_API_KEY"] = openai_key
+            st.session_state.openai_api_key = openai_key
 
         # Gemini
         gemini_key = st.text_input(
             "Gemini API Key",
-            value=os.environ.get("GEMINI_API_KEY", ""),
+            value=st.session_state.get("gemini_api_key", ""),
             type="password",
             key="sidebar_gemini_key",
             placeholder="AIza...",
             help="For Gemini CLI",
         )
         if gemini_key:
-            os.environ["GEMINI_API_KEY"] = gemini_key
+            st.session_state.gemini_api_key = gemini_key
 
         # Cursor
         cursor_key = st.text_input(
             "Cursor API Key",
-            value=os.environ.get("CURSOR_API_KEY", ""),
+            value=st.session_state.get("cursor_api_key", ""),
             type="password",
             key="sidebar_cursor_key",
             placeholder="cursor_...",
             help="For Cursor CLI",
         )
         if cursor_key:
-            os.environ["CURSOR_API_KEY"] = cursor_key
+            st.session_state.cursor_api_key = cursor_key
 
         st.divider()
 
@@ -1422,7 +1459,7 @@ def render_sidebar():
         st.markdown("**Status**")
 
         def key_status(name: str, env_var: str, prefix: str = "") -> None:
-            value = os.environ.get(env_var, "")
+            value = get_api_key(env_var)
             if value and (not prefix or value.startswith(prefix)):
                 st.markdown(f"✅ {name}")
             else:
@@ -1434,15 +1471,14 @@ def render_sidebar():
         key_status("Gemini", "GEMINI_API_KEY", "AIza")
         key_status("Cursor", "CURSOR_API_KEY", "")
 
-        # Also set Daytona from session state to env
-        if st.session_state.get("daytona_api_key"):
-            os.environ["DAYTONA_API_KEY"] = st.session_state.daytona_api_key
-
 
 # ============ Main ============
 
 
 def main():
+    # Initialize API keys from .env (once per session)
+    init_api_keys_from_env()
+
     # Render sidebar first
     render_sidebar()
 
